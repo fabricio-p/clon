@@ -1,8 +1,15 @@
 import tables, strutils
 import questionable/options
-import ./status
 
 type
+  Status* {.pure.} = enum
+    Ok
+    InvalidChar = "Invalid character"
+    InvalidNumLit = "Invalid number literal"
+    InvalidEscSeq = "Invalid escape sequence"
+    UnterminatedStr = "Unterminated string character"
+    UnterminatedChar = "Unterminated character literal"
+    CharNewline
   TokenKind* = enum
     tokEOF
     tokIntLit
@@ -47,6 +54,8 @@ type
     token*: Token
     status: Status
 
+func isOk*(status: Status): bool {.inline.} = status == Status.Ok
+
 func empty(span: typedesc[Span]): Span = ((0, 1), (0, 1))
 
 const
@@ -64,8 +73,10 @@ const
     "or": tokOr,
     "not": tokNot
   }.toTable
-  eof* = char uint8.high
+  Eof* = cast[char](uint8.high)
   EscapableChars* = {'r', 't', 'n', 'e', '\\'}
+  BinOpTokens* = tokPlus..tokDot
+  UnOpTokens* = {tokMinus}
 
 proc next*(lexer: var Lexer): (Token, Status)
 
@@ -89,7 +100,7 @@ func skip(lexer: Lexer, chars: set[char],
 
 func at(lexer: Lexer, offset: int): char {.inline.} =
   if offset < lexer.src.len: lexer.src[offset]
-  else: eof
+  else: Eof
 
 func current(lexer: Lexer): char {.inline.} =
   lexer.at(lexer.token.span.e.offset)

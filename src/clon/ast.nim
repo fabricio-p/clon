@@ -1,4 +1,4 @@
-import ./lexer, ./env
+import ./lexer, ./env, ./box
 import questionable/options
 
 type
@@ -29,6 +29,7 @@ type
     opNeq
     opAnd
     opOr
+    opDot
     opIndex
   Op* = object
     kind*: OpKind
@@ -46,7 +47,7 @@ type
     exprFc
     exprFcCall
   FcCall* = object
-    callee*: ref Expr
+    callee*:Box[Expr]
     args*: seq[Expr]
   Expr* = object
     case kind*: ExprKind

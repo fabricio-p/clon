@@ -36,9 +36,16 @@ type
     tokMinus
     tokAsterisk
     tokSlash
+    tokGt
+    tokLt
+    tokAssign
+    tokGe
+    tokLe
+    tokEq
+    tokNot
+    tokNeq
     tokAnd
     tokOr
-    tokNot
     tokDot
     tokComma
     tokColon
@@ -75,12 +82,13 @@ const
   }.toTable
   Eof* = cast[char](uint8.high)
   EscapableChars* = {'r', 't', 'n', 'e', '\\'}
-  BinOpTokens* = tokPlus..tokDot
-  UnOpTokens* = {tokMinus}
+  InfixOpTokens* = {tokPlus..tokDot, tokLBracket}
+  PrefixOpTokens* = {tokMinus, tokNot}
+  PostfixOpTokens*: set[TokenKind] = {}
 
 proc next*(lexer: var Lexer): (Token, Status)
 
-func `[]`(lexer: Lexer, span: Span): string {.inline.} =
+func `[]`*(lexer: Lexer, span: Span): string {.inline.} =
   lexer.src[span.s.offset..<span.e.offset]
 
 proc initLexer*(src: string): Lexer =

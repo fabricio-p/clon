@@ -8,4 +8,4 @@ template withas*(expr: typed; name: untyped): untyped =
 template doWhile*(cond, body: untyped): untyped =
   while true:
     body
-    if not cond: break
+    if not (cond): break

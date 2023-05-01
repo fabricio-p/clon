@@ -11,45 +11,45 @@ type
     UnterminatedChar = "Unterminated character literal"
     CharNewline
   TokenKind* = enum
-    tokEOF
-    tokIntLit
-    tokFloatLit
-    tokStrLit
-    tokChrLit
-    tokIdent
-    tokFc
-    tokLoc
-    tokIf
-    tokWhl
-    tokFor
-    tokCase
-    tokBox
-    tokRet
-    tokEnd
-    tokLParen
-    tokRParen
-    tokLBracket
-    tokRBracket
-    tokLBrace
-    tokRBrace
-    tokPlus
-    tokMinus
-    tokAsterisk
-    tokSlash
-    tokGt
-    tokLt
-    tokAssign
-    tokGe
-    tokLe
-    tokEq
-    tokNot
-    tokNeq
-    tokAnd
-    tokOr
-    tokDot
-    tokComma
-    tokColon
-    tokSemiColon
+    tokEOF       = "EOF"
+    tokIntLit    = "$int"
+    tokFloatLit  = "$float"
+    tokStrLit    = "$str"
+    tokChrLit    = "$char"
+    tokIdent     = "$ident"
+    tokFc        = "fc"
+    tokLoc       = "loc"
+    tokIf        = "if"
+    tokWhl       = "whl"
+    tokFor       = "for"
+    tokCase      = "case"
+    tokBox       = "box"
+    tokRet       = "ret"
+    tokEnd       = "end"
+    tokLParen    = "("
+    tokRParen    = ")"
+    tokLBracket  = "["
+    tokRBracket  = "]"
+    tokLBrace    = "{"
+    tokRBrace    = "}"
+    tokPlus      = "+"
+    tokMinus     = "-"
+    tokAsterisk  = "*"
+    tokSlash     = "/"
+    tokGt        = ">"
+    tokLt        = "<"
+    tokAssign    = "="
+    tokGe        = ">="
+    tokLe        = "<="
+    tokEq        = "=="
+    tokNot       = "not"
+    tokNeq       = "!="
+    tokAnd       = "and"
+    tokOr        = "or"
+    tokDot       = "."
+    tokComma     = ","
+    tokColon     = ":"
+    tokSemiColon = ";"
   Pos* = tuple[offset, line: int]
   Span* = tuple[s, e: Pos]
   Token* = object
@@ -81,7 +81,7 @@ const
     "not": tokNot
   }.toTable
   Eof* = cast[char](uint8.high)
-  EscapableChars* = {'r', 't', 'n', 'e', '\\'}
+  EscapableChars* = {'r', 't', 'n', 'e', '0', '\\'}
   InfixOpTokens* = {tokPlus..tokDot, tokLBracket}
   PrefixOpTokens* = {tokMinus, tokNot}
   PostfixOpTokens*: set[TokenKind] = {}
@@ -204,7 +204,7 @@ proc lexStr(lexer: var Lexer) =
           else:
             pos.offset += 2
         else:
-          break
+          break # NOTE: Probably should error
     elif curr == '\n':
       inc pos.line
   if pos.offset < lexer.src.len and at(pos.offset) == '"':
@@ -213,22 +213,23 @@ proc lexStr(lexer: var Lexer) =
     lexer.status = UnterminatedStr
 
 proc lexChar(lexer: var Lexer) =
-  var
-    pos = lexer.token.span.e
+  var pos = lexer.token.span.e
   inc pos.offset
   lexer.status =
-    # get current char, inc offset, case on char
     case (let curr = at(pos.offset); inc pos.offset; curr)
     of '\n':
-      if at(pos.offset) == '\'': CharNewLine
-      else:                      UnterminatedChar
+      if pos.offset < lexer.src.len and at(pos.offset) == '\'':
+        CharNewLine
+      else:
+        UnterminatedChar
     of '\\':
       # get escaped char
       let curr = at(pos.offset)
-      # inc offset
-      inc pos.offset
+      if curr in EscapableChars:
+        inc pos.offset
+        Ok
       # compare char
-      if curr == 'x' or curr == 'X':
+      elif curr == 'x' or curr == 'X':
         inc pos.offset
         if lexer.src.len > pos.offset + 2:
           if (at(pos.offset) notin HexDigits or
@@ -239,36 +240,46 @@ proc lexChar(lexer: var Lexer) =
             Ok
         else:
           InvalidEscSeq
-      elif curr in EscapableChars: Ok
       else: InvalidEscSeq
     else: Ok
   if lexer.status.isOk and lexer.at(pos.offset) != '\'':
     lexer.status = UnterminatedChar
-  inc pos.offset
+  else:
+    inc pos.offset
   lexer.token.span.e = pos
   lexer.token.kind = tokChrLit
 
 proc next*(lexer: var Lexer): (Token, Status) =
   result = (lexer.token, lexer.status)
   lexer.pos = lexer.token.span.e
-  if lexer.pos.offset >= lexer.src.high:
+  if lexer.pos.offset >= lexer.src.len:
     lexer.token = Token(kind: tokEOF, span: (lexer.pos, lexer.pos))
     return
   lexer.token.span.s = lexer.skipWhitespace()
   lexer.token.span.e = lexer.token.span.s
   let ch = lexer.current
   case ch
-  of '0'..'9': lexer.lexNumber()
+  of '0'..'9':
+    lexer.lexNumber()
   of '-', '+':
-    if lexer.peek() in '0'..'9': lexer.lexNumber()
+    if lexer.peek() in '0'..'9':
+      lexer.lexNumber()
     else:
       inc lexer.token.span.e.offset
       lexer.token.kind = if ch == '-': tokMinus else: tokPlus
-  of '"': lexer.lexStr()
+  of '"':
+    lexer.lexStr()
   of 'a'..'z', 'A'..'Z', '_':
     lexer.lexIdent()
     lexer.token.kind = keywords.getOrDefault(lexer[lexer.token.span], tokIdent)
-  of '\'': lexer.lexChar()
+  of '\'':
+    lexer.lexChar()
+  of '=':
+    lexer.token.kind = tokAssign
+    inc lexer.token.span.e.offset
+    if lexer.at(lexer.token.span.e.offset) == '=':
+      inc lexer.token.span.e.offset
+      inc lexer.token.kind, 3
   else:
     inc lexer.token.span.e.offset
     lexer.token.kind = case ch

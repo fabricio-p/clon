@@ -5,7 +5,7 @@ author        = "fabriciopashaj"
 description   = "Some new programming language"
 license       = "GPL-3.0"
 srcDir        = "src"
-bin           = @["clon/clon"]
+bin           = @["clon"]
 
 
 # Dependencies

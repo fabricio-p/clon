@@ -14,17 +14,18 @@ import ./lexer, ./ast, ./box, ./util # , ./error_reporter, ./env
 type
   Parser* = object
     lexer*: Lexer
-    ast*: Ast
+    # ast*: Ast
     # rep*: ErrReporter
 
 template todo(msg: static[string] = ""): untyped =
   let (file, line, _) = instantiationInfo()
-  stderr.styledWrite(
-    fgBlue, "Code path not yet implemented (", msg, ") [",
+  stderr.styledWriteLine(
+    fgCyan, "Code path not yet implemented (", msg, ") ",
+    fgWhite, "[",
     fgGreen, file,
     fgWhite, ":",
     fgGreen, $line,
-    fgBlue, "]")
+    fgWhite, "]")
   quit(QuitFailure)
 
 template at(parser: Parser, offset: int): untyped = parser.lexer.src[offset]
@@ -62,7 +63,7 @@ proc intExpr(parser: var Parser): BiggestInt =
                 of 'b', 'B': fn(Bin) # parseBin[BiggestInt]
                 else: biggestInt
               else: biggestInt
-  discard parseFn(parser.lexer.src.toOpenArray(start, finish),
+  discard parseFn(parser.lexer.src.toOpenArray(start, finish - 1),
                   result, 0)
 
 proc floatExpr(parser: var Parser): float =
@@ -75,14 +76,15 @@ proc escSeq(parser: var Parser, start: int): (?char, int) =
   var offset = start
   result[0] =
     case parser.at(offset)
-    of 'r': '\r'.some
-    of 'n': '\n'.some
-    of 'e': '\x1f'.some
-    of 't': '\t'.some
-    of '\\': '\\'.some
-    of '0': '\0'.some
+    of 'r': some('\r')
+    of 'n': some('\n')
+    of 'e': some('\x1f')
+    of 't': some('\t')
+    of '\\': some('\\')
+    of '0': some('\0')
     of 'x', 'X':
-      if parser.at(offset + 1) in HexDigits and
+      if offset + 2 < parser.lexer.src.len and
+        parser.at(offset + 1) in HexDigits and
         parser.at(offset + 2) in HexDigits:
         var hex: int
         discard parser.lexer.src.toOpenArray(offset + 1, offset + 2)
@@ -91,18 +93,19 @@ proc escSeq(parser: var Parser, start: int): (?char, int) =
         hex.char.some
       else: char.none
     else: char.none
-  result[1] = offset + 1
+  inc offset
+  result[1] = offset
 
 proc chrExpr(parser: var Parser): ?char =
   let
     tk = !parser.lexer.next()
     start = tk.span.s.offset + 1
   if parser.at(start) == '\\':
-    if parser.at(start + 1) == '\'': '\''.some
+    if parser.at(start + 1) == '\'': some('\'')
     else:
-      escSeq(parser, start)[0]
+      escSeq(parser, start + 1)[0]
   else:
-    parser.at(start).some
+    some(parser.at(start))
 
 proc strExpr(parser: var Parser): string =
   let
@@ -110,12 +113,39 @@ proc strExpr(parser: var Parser): string =
     start = tk.span.s.offset
     len = tk.span.e.offset - start
   result = newStringOfCap(len)
-  var i = start
-  while i < tk.span.e.offset:
+  var
+    i = start + 1
+    item: char
+  while i < tk.span.e.offset - 1:
     if parser.at(i) == '\\':
-      discard # TODO
+      inc i
+      let cc = parser.at(i)
+      case cc
+      of '"': item = '"'
+      of 'r': item = '\r'
+      of 't': item = '\t'
+      of 'n': item = '\n'
+      of 'e': item = '\e'
+      of '\\': item = '\\'
+      of 'x', 'X':
+        inc i
+        if parser.lexer.src.len > i + 2:
+          if parser.at(i) notin HexDigits or
+          parser.at(i + 1) notin HexDigits:
+            quit("Invalid hex escape character", QuitFailure)
+          else:
+            var hex: int
+            discard parser.lexer.src.toOpenArray(i, i + 1).parseHex(hex)
+            inc i
+            item = char(hex)
+        else:
+          quit("Invalid hex escape character", QuitFailure)
+      else:
+        quit("Invalid escape character", QuitFailure)
     else:
-      result.add(parser.at(i))
+      item = parser.at(i)
+    inc i
+    result.add(item)
 
 type Precedence = range[-1..20]
 
@@ -144,7 +174,7 @@ let
   precPrefix = Precedence(17)
   precPostfix = Precedence(18)
 
-proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr
+proc parseExpr*(parser: var Parser, minPrec: int8 = 0): Expr
 
 # 
 # proc parseFcCallArgs(parser: var Parser, env: var Env): seq[Expr] =
@@ -174,21 +204,22 @@ proc primaryExpr(parser: var Parser): Expr =
     result = Expr(kind: exprIdent,
                   ident: parser.lexer[(!parser.lexer.next()).span])
   of tokLParen:
+    discard parser.lexer.next()
     result = parser.parseExpr(0)
-    doAssert (!parser.lexer.next).kind == tokRParen
+    doAssert (!parser.lexer.next()).kind == tokRParen
   of InfixOpTokens:
     quit("Expected expression, found infix operator", QuitFailure)
   else:
     todo("Token doesn't belong in an expression")
 
 proc fcArgs(parser: var Parser): seq[Expr] =
-  doWhile parser.lookahead.kind == tokComma:
+  while parser.lookahead.kind != tokRParen:
+    discard parser.lexer.next()
     result.add(parser.parseExpr(0))
-  doAssert (!parser.lexer.next()).kind == tokRParen:
-    "Expected comma or right parenthesis" # TODO: Report, detailed
+    if parser.lookahead.kind notin {tokComma, tokRParen}:
+      quit("Expected comma or closing parenthesis after argument", QuitFailure)
 
 proc parseFc(parser: var Parser, callee: sink Expr): Expr =
-  discard parser.lexer.next()
   result = Expr(kind: exprFcCall,
                 fcCall: FcCall(callee: box(callee), args: parser.fcArgs()))
   doAssert (!parser.lexer.next()).kind == tokRParen:
@@ -210,15 +241,15 @@ func toPostOp(kind: TokenKind): OpKind {.inline.} =
 proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr =
   result =
     if parser.lookahead.kind.withas(pref) in PrefixOpTokens:
+      discard parser.lexer.next()
       Expr(kind: exprOp,
-           op: Op(kind: pref.toInOp(),
+           op: Op(kind: pref.toPrefOp(),
                   operands: @[parser.parseExpr(precPrefix)]))
     else:
       parser.primaryExpr()
   forever:
     let afterKind = parser.lookahead.kind
-    if false:
-      todo("should be something")
+    if afterKind == tokEOF: break
     elif afterKind in PostfixOpTokens:
       if precPostfix < minPrec: break
       let opKind = afterKind.toPostOp()
@@ -227,17 +258,20 @@ proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr =
     if afterKind == tokLParen:
       result = parser.parseFc(result)
       continue
-    let
-      opKind = afterKind.toInOp()
-      prec = precInfix[opKind]
-    if prec.left < minPrec: break
-    discard parser.lexer.next()
-    let rhs = parser.parseExpr(prec.right)
-    if result.kind == exprOp and result.op.kind == opKind:
-      result.op.operands.add(rhs)
-    else:
-      result = Expr(kind: exprOp,
-                    op: Op(kind: opKind, operands: @[result, rhs]))
-    if result.op.kind == opIndex:
-      doAssert (!parser.lexer.next()).kind == tokRBracket:
-        "Expected closing bracket" # TODO: Error report, detailed
+    if afterKind in InfixOpTokens:
+      let
+        opKind = afterKind.toInOp()
+        prec = precInfix[opKind]
+      if prec.left < minPrec: break
+      discard parser.lexer.next()
+      let rhs = parser.parseExpr(prec.right)
+      if result.kind == exprOp and result.op.kind == opKind:
+        result.op.operands.add(rhs)
+      else:
+        result = Expr(kind: exprOp,
+                      op: Op(kind: opKind, operands: @[result, rhs]))
+      if result.op.kind == opIndex:
+        doAssert (!parser.lexer.next()).kind == tokRBracket:
+          "Expected closing bracket" # TODO: Error report, detailed
+      continue
+    break

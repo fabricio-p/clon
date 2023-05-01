@@ -1,8 +1,14 @@
+from strutils import PrintableChars
+from strformat import formatValue
 import ./lexer, ./env, ./box
 import questionable/options
 
 type
-  LitKind* = enum litInt, litChr, litFloat, litStr
+  LitKind* = enum
+    litInt    = "INT"
+    litChr    = "CHR"
+    litFloat  = "FLOAT"
+    litStr    = "STR"
   Lit* = object
     case kind*: LitKind
     of litInt:
@@ -15,22 +21,22 @@ type
       s*: string
   OpKind* = enum
     opNone
-    opPlus
-    opMinus
-    opAsterisk
-    opSlash
-    opGt
-    opLt
-    opAssign
-    opGe
-    opLe
-    opEq
-    opNot
-    opNeq
-    opAnd
-    opOr
-    opDot
-    opIndex
+    opPlus      = "+"
+    opMinus     = "-"
+    opAsterisk  = "*"
+    opSlash     = "/"
+    opLt        = "<"
+    opAssign    = "="
+    opGt        = ">"
+    opLe        = "<="
+    opEq        = "=="
+    opGe        = ">="
+    opNot       = "not"
+    opNeq       = "!="
+    opAnd       = "and"
+    opOr        = "or"
+    opDot       = "."
+    opIndex     = "[]"
   Op* = object
     kind*: OpKind
     operands*: seq[Expr]
@@ -64,7 +70,7 @@ type
     else: discard
   Field* = object of RootObj
     name*: string
-    typ*: string
+    typ*: ?string
   VarDecl* = object of Field
     value*: Expr
   BoxDecl* = object
@@ -126,6 +132,38 @@ type
   Ast* = ref object
     modules*: seq[Module]
     # typeEnv*: TypeEnv
+
+func `$`*(lit: Lit): string =
+  case lit.kind
+  of litInt: result = $lit.i
+  of litChr:
+    result.add('\'')
+    if lit.c == '\n':
+      result.add("\\n")
+    elif lit.c == '\r':
+      result.add("\\r")
+    elif lit.c in PrintableChars:
+      result.add(lit.c)
+    else:
+      result.add"\x"
+      result.formatValue(lit.c.int, "02x")
+    result.add('\'')
+  of litFloat: result.formatValue(lit.f, ".6")
+  of litStr:
+    result.add('"')
+    for c in lit.s:
+      if c == '"':
+        result.add"\"
+      if c == '\n':
+        result.add("\\n")
+      elif c == '\r':
+        result.add("\\r")
+      elif c in PrintableChars:
+        result.add(c)
+      else:
+        result.add"\x"
+        result.formatValue(c.int, "02x")
+    result.add('"')
 
 proc initBlock*[T](prev: Option[ptr Scope]): Block[T] =
   result.code = newSeq[T]()

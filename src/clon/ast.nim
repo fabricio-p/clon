@@ -70,7 +70,7 @@ type
     else: discard
   Field* = object of RootObj
     name*: string
-    typ*: ?string
+    typ*: Box[Expr]
   VarDecl* = object of Field
     value*: Expr
   BoxDecl* = object
@@ -79,19 +79,24 @@ type
   Block*[T] = object
     scope*: Scope
     code*: seq[T]
-  IfStmt* = seq[tuple[cond: Expr, body: Block[Stmt]]]
+  IfClause* = tuple[cond: Expr, body: Block[Stmt]]
+  IfStmt* = seq[IfClause]
   WhlLoop* = object of RootObj
     cond*: Expr
     body*: Block[Stmt]
   ForLoop* = object of WhlLoop
     init*: VarDecl
     step*: Expr
+  ForInLoop* = object
+    capture*: Expr
+    iter*: Expr
   StmtKind* = enum
     stmtNone
     stmtExpr
     stmtVarDecl
     stmtIf
     stmtForLoop
+    stmtForInLoop
     stmtWhlLoop
     stmtFcDecl
     stmtRet
@@ -107,6 +112,8 @@ type
       ifs*: IfStmt
     of stmtForLoop:
       forl*: ForLoop
+    of stmtForInLoop:
+      forinl*: ForInLoop
     of stmtWhlLoop:
       whll*: WhlLoop
     of stmtFcDecl:
@@ -165,7 +172,7 @@ func `$`*(lit: Lit): string =
         result.formatValue(c.int, "02x")
     result.add('"')
 
-proc initBlock*[T](prev: Option[ptr Scope]): Block[T] =
+proc initBlock*[T](prev = none(ptr Scope)): Block[T] =
   result.code = newSeq[T]()
   result.scope = initScope(prev)
 

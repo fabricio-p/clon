@@ -5,10 +5,11 @@ proc box*[T](value: sink T): Box[T] =
   new(result.data)
   result.data[] = value
 
-proc getRef*[T](box: Box[T]): ref T =
-  result = box.data
+func getRefUnsafe*[T](box: Box[T]): ref T = result = box.data
 
-proc unbox*[T](box: Box[T]): T =
+func isEmpty*[T](box: Box[T]): bool = isNil(box.data)
+
+proc unbox*[T](box: sink Box[T]): T =
   runnableExamples:
     let num = box(3)
     doAssert num == box.unbox()
@@ -16,3 +17,8 @@ proc unbox*[T](box: Box[T]): T =
     raise newException(ValueError, "Box has no value to unbox")
   else:
     result = box.data[]
+
+func `[]`*[T](box: sink Box[T]): T = box.unbox()
+
+template `.`*[T](box: Box[T], name: untyped): untyped =
+  box.getRefUnsafe.name

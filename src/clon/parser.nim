@@ -17,17 +17,6 @@ type
     # ast*: Ast
     # rep*: ErrReporter
 
-template todo(msg: static[string] = ""): untyped =
-  let (file, line, _) = instantiationInfo()
-  stderr.styledWriteLine(
-    fgCyan, "Code path not yet implemented (", msg, ") ",
-    fgWhite, "[",
-    fgGreen, file,
-    fgWhite, ":",
-    fgGreen, $line,
-    fgWhite, "]")
-  quit(QuitFailure)
-
 template at(parser: Parser, offset: int): untyped = parser.lexer.src[offset]
 template lookahead(parser: Parser): Token = parser.lexer.token
 
@@ -44,6 +33,10 @@ template `!`(tkResult: (Token, Status)): Token =
 
 template `=!`(sym: untyped, tkResult: (Token, Status)): bool =
   (var `sym` = tkResult[0]; tkResult[1])
+
+###############################################################################
+#---------------------------- Expression parsing ----------------------------##
+###############################################################################
 
 func biggestInt(s: openArray[char], n: var BiggestInt, maxLen: int): int =
   s.parseBiggestInt(n)
@@ -166,7 +159,7 @@ let
       opAsterisk: (11, 12),
       opSlash:    (11, 12),
       opAssign:   (14, 13),
-      opDot:      (20, 19)
+      opDot:      (19, 20),
     }
     for (kind, prec) in mapping:
       precs[kind] = (Precedence(prec[0]), Precedence(prec[1]))
@@ -174,7 +167,11 @@ let
   precPrefix = Precedence(17)
   precPostfix = Precedence(18)
 
-proc parseExpr*(parser: var Parser, minPrec: int8 = 0): Expr
+proc parseExpr*(
+  parser: var Parser,
+  minPrec = Precedence.low,
+  terminalTokens = {tokEof, tokEnd}
+): Expr
 
 # 
 # proc parseFcCallArgs(parser: var Parser, env: var Env): seq[Expr] =
@@ -209,21 +206,31 @@ proc primaryExpr(parser: var Parser): Expr =
     doAssert (!parser.lexer.next()).kind == tokRParen
   of InfixOpTokens:
     quit("Expected expression, found infix operator", QuitFailure)
+  of tokFc:
+    todo("Function parsing")
+  of tokEof:
+    result = Expr(kind: exprNone)
   else:
-    todo("Token doesn't belong in an expression")
+    todo("Either invalid or not-yet-handled token")
 
 proc fcArgs(parser: var Parser): seq[Expr] =
   while parser.lookahead.kind != tokRParen:
-    discard parser.lexer.next()
     result.add(parser.parseExpr(0))
-    if parser.lookahead.kind notin {tokComma, tokRParen}:
+    if parser.lookahead.kind == tokComma:
+      discard parser.lexer.next()
+    elif parser.lookahead.kind != tokRParen:
       quit("Expected comma or closing parenthesis after argument", QuitFailure)
 
-proc parseFc(parser: var Parser, callee: sink Expr): Expr =
+proc parseFcCall(parser: var Parser, callee: sink Expr): Expr =
+  discard parser.lexer.next()
   result = Expr(kind: exprFcCall,
                 fcCall: FcCall(callee: box(callee), args: parser.fcArgs()))
-  doAssert (!parser.lexer.next()).kind == tokRParen:
-    "Expected closing parenthesis (function call)" # TODO: Report, detailed
+  doAssert (!parser.lexer.next()).kind == tokRParen,
+           "Expected closing parenthesis (function call)" # TODO: Report,
+                                                          #       detailed
+
+proc parseFcExpr(parser: var Parser): FcExpr =
+  todo("Function expression/value parsing")
 
 func toPrefOp(kind: TokenKind): OpKind {.inline.} =
   case kind
@@ -238,17 +245,21 @@ func toInOp(kind: TokenKind): OpKind {.inline.} =
 func toPostOp(kind: TokenKind): OpKind {.inline.} =
   opNone
 
-proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr =
+proc parseExpr(
+  parser: var Parser,
+  minPrec = Precedence.low,
+  terminalTokens = {tokEof, tokEnd}
+): Expr =
+  let terminalTokens = terminalTokens + {tokEof, tokEnd}
   result =
     if parser.lookahead.kind.withas(pref) in PrefixOpTokens:
       discard parser.lexer.next()
       Expr(kind: exprOp,
            op: Op(kind: pref.toPrefOp(),
-                  operands: @[parser.parseExpr(precPrefix)]))
+                  operands: @[parser.parseExpr(precPrefix, terminalTokens)]))
     else:
       parser.primaryExpr()
-  forever:
-    let afterKind = parser.lookahead.kind
+  while parser.lookahead.kind.withas(afterKind) notin terminalTokens:
     if afterKind == tokEOF: break
     elif afterKind in PostfixOpTokens:
       if precPostfix < minPrec: break
@@ -256,7 +267,7 @@ proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr =
       result = Expr(kind: exprOp, op: Op(kind: opKind, operands: @[result]))
       continue
     if afterKind == tokLParen:
-      result = parser.parseFc(result)
+      result = parser.parseFcCall(result)
       continue
     if afterKind in InfixOpTokens:
       let
@@ -271,7 +282,7 @@ proc parseExpr(parser: var Parser, minPrec: int8 = 0): Expr =
         result = Expr(kind: exprOp,
                       op: Op(kind: opKind, operands: @[result, rhs]))
       if result.op.kind == opIndex:
-        doAssert (!parser.lexer.next()).kind == tokRBracket:
-          "Expected closing bracket" # TODO: Error report, detailed
+        doAssert (!parser.lexer.next()).kind == tokRBracket,
+                 "Expected closing bracket" # TODO: Error report, detailed
       continue
     break

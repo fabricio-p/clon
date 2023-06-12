@@ -36,12 +36,12 @@ type
     tokMinus     = "-"
     tokAsterisk  = "*"
     tokSlash     = "/"
-    tokGt        = ">"
     tokLt        = "<"
     tokAssign    = "="
-    tokGe        = ">="
+    tokGt        = ">"
     tokLe        = "<="
     tokEq        = "=="
+    tokGe        = ">="
     tokNot       = "not"
     tokNeq       = "!="
     tokAnd       = "and"
@@ -49,6 +49,7 @@ type
     tokDot       = "."
     tokComma     = ","
     tokColon     = ":"
+    tokQuestion  = "?"
     tokSemiColon = ";"
   Pos* = tuple[offset, line: int]
   Span* = tuple[s, e: Pos]
@@ -249,6 +250,7 @@ proc lexChar(lexer: var Lexer) =
   lexer.token.span.e = pos
   lexer.token.kind = tokChrLit
 
+# NOTE: Consider making this an iterator
 proc next*(lexer: var Lexer): (Token, Status) =
   result = (lexer.token, lexer.status)
   lexer.pos = lexer.token.span.e
@@ -266,7 +268,8 @@ proc next*(lexer: var Lexer): (Token, Status) =
       lexer.lexNumber()
     else:
       inc lexer.token.span.e.offset
-      lexer.token.kind = if ch == '-': tokMinus else: tokPlus
+      # lexer.token.kind = if ch == '-': tokMinus else: tokPlus
+      lexer.token.kind = TokenKind(ord(tokMinus) - ord(ch == '+'))
   of '"':
     lexer.lexStr()
   of 'a'..'z', 'A'..'Z', '_':
@@ -274,8 +277,8 @@ proc next*(lexer: var Lexer): (Token, Status) =
     lexer.token.kind = keywords.getOrDefault(lexer[lexer.token.span], tokIdent)
   of '\'':
     lexer.lexChar()
-  of '=':
-    lexer.token.kind = tokAssign
+  of '<'..'>': # '<', '=', '>'
+    lexer.token.kind = TokenKind(ord(tokLt) + (ord(ch) - ord('<')))
     inc lexer.token.span.e.offset
     if lexer.at(lexer.token.span.e.offset) == '=':
       inc lexer.token.span.e.offset
@@ -292,10 +295,11 @@ proc next*(lexer: var Lexer): (Token, Status) =
                          of '.': tokDot
                          of ',': tokComma
                          of ':': tokColon
+                         of '?': tokQuestion
                          of ';': tokSemicolon
                          of '*': tokAsterisk
                          of '/': tokSlash
-                         else: tokEOF
+                         else  : tokEOF
 
 iterator items*(lexer: var Lexer): Token =
   while lexer.token.kind != tokEOF and

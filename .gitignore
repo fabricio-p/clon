@@ -1,3 +1,5 @@
 .*.sw*
 /tmp
 /clon
+/tests/test_lexer
+/tests/test_parser

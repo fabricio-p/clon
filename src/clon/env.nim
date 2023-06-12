@@ -15,7 +15,7 @@ type
     FC
     ALIAS
     REF
-  BaseType* = range[VOID..FLOAT]
+  PrimtiveType* = range[VOID..FLOAT]
   TypeID* = uint32
   Type* = object
     tid*: TypeID

@@ -9,3 +9,4 @@ when isMainModule:
     pars.lexer = initLexer(line)
     expr = pars.parseExpr()
     stdout.print(expr)
+  echo ""

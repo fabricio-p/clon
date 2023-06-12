@@ -53,6 +53,7 @@ template printIndent(f: File, indent: int): untyped =
     f.write("│")
     for j in 0..<IndentWidth:
       f.write(' ')
+  f.resetAttributes()
 
 proc print*(f: File, fc: FcDecl|FcExpr, level: int) =
   todo("Function printing")
@@ -91,7 +92,7 @@ proc print*(f: File, expr: Expr, level: int = 0) =
   f.write("Expression/")
   case expr.kind
   of exprNone:
-    f.swl("None")
+    f.swl("None", resetStyle)
   of exprLit:
     f.swl("Literal", resetStyle, ": ",
           KindColor, $expr.lit.kind,
@@ -116,7 +117,7 @@ proc print*(f: File, expr: Expr, level: int = 0) =
     f.swl("FcCall", resetStyle, ":")
     f.printIndent(level + 1)
     f.swl(LabelColor, "callee", resetStyle, ":")
-    f.print(expr.fccall.callee.getRef[], level + 2)
+    f.print(expr.fccall.callee.getRefUnsafe[], level + 2)
     if expr.fccall.args.len != 0:
       f.printIndent(level + 1)
       f.swl(LabelColor, "arguments", resetStyle, ":")

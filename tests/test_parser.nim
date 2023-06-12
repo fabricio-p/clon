@@ -220,3 +220,78 @@ suite "clon/parser":
         check expr.fcCall.args[1].fcCall.args[0].ident == "e"
         check expr.fcCall.args[1].fcCall.args[1].kind == exprIdent
         check expr.fcCall.args[1].fcCall.args[1].ident == "f"
+  suite "statements":
+    suite "loc":
+      var
+        parser: Parser
+        stmt: Stmt
+      test "uninitialized":
+        parser.lexer = initLexer("loc a: b;")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtVarDecl
+        check stmt.varDecl.name == "a"
+        check stmt.varDecl.typ.kind == exprIdent
+        check stmt.varDecl.typ.ident == "b"
+        check stmt.varDecl.value.kind == exprNone
+      test "initialized":
+        parser.lexer = initLexer("loc i: int = 0;")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtVarDecl
+        check stmt.varDecl.name == "i"
+        check stmt.varDecl.typ.kind == exprIdent
+        check stmt.varDecl.typ.ident == "int"
+        check stmt.varDecl.value.kind == exprLit
+        check stmt.varDecl.value.lit.kind == litInt
+        check stmt.varDecl.value.lit.i == 0
+    suite "if":
+      var
+        parser: Parser
+        stmt: Stmt
+      test "single clause":
+        parser.lexer = initLexer("if ?(cond) loc k: d = dhp; end")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtIf
+        check stmt.ifs.len == 1
+        check stmt.ifs[0].cond.kind == exprIdent
+        check stmt.ifs[0].cond.ident == "cond"
+        check stmt.ifs[0].body.code.len == 1
+        check stmt.ifs[0].body.code[0].kind == stmtVarDecl
+        check stmt.ifs[0].body.code[0].varDecl.name == "k"
+        check stmt.ifs[0].body.code[0].varDecl.typ.kind == exprIdent
+        check stmt.ifs[0].body.code[0].varDecl.typ.ident == "d"
+        check stmt.ifs[0].body.code[0].varDecl.value.kind == exprIdent
+        check stmt.ifs[0].body.code[0].varDecl.value.ident == "dhp"
+      test "multiple clauses":
+        parser.lexer = initLexer("""
+        if
+        ?(cond1)
+           foo = 1;
+        ?((cond2))
+           foo = 30;
+        end
+        """)
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtIf
+        check stmt.ifs.len == 2
+        check stmt.ifs[0].cond.kind == exprIdent
+        check stmt.ifs[0].cond.ident == "cond1"
+        check stmt.ifs[0].body.code.len == 1
+        check stmt.ifs[0].body.code[0].kind == stmtExpr
+        check stmt.ifs[0].body.code[0].expr.kind == exprOp
+        check stmt.ifs[0].body.code[0].expr.op.kind == opAssign
+        check stmt.ifs[0].body.code[0].expr.op.operands[0].kind == exprIdent
+        check stmt.ifs[0].body.code[0].expr.op.operands[0].ident == "foo"
+        check stmt.ifs[0].body.code[0].expr.op.operands[1].kind == exprLit
+        check stmt.ifs[0].body.code[0].expr.op.operands[1].lit.kind == litInt
+        check stmt.ifs[0].body.code[0].expr.op.operands[1].lit.i == 1
+        check stmt.ifs[1].cond.kind == exprIdent
+        check stmt.ifs[1].cond.ident == "cond2"
+        check stmt.ifs[1].body.code.len == 1
+        check stmt.ifs[1].body.code[0].kind == stmtExpr
+        check stmt.ifs[1].body.code[0].expr.kind == exprOp
+        check stmt.ifs[1].body.code[0].expr.op.kind == opAssign
+        check stmt.ifs[1].body.code[0].expr.op.operands[0].kind == exprIdent
+        check stmt.ifs[1].body.code[0].expr.op.operands[0].ident == "foo"
+        check stmt.ifs[1].body.code[0].expr.op.operands[1].kind == exprLit
+        check stmt.ifs[1].body.code[0].expr.op.operands[1].lit.kind == litInt
+        check stmt.ifs[1].body.code[0].expr.op.operands[1].lit.i == 30

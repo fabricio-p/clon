@@ -286,3 +286,120 @@ proc parseExpr(
                  "Expected closing bracket" # TODO: Error report, detailed
       continue
     break
+
+###############################################################################
+#----------------------------- Statement parsing -----------------------------#
+###############################################################################
+
+proc parseField(parser: var Parser): Field =
+  let tkName = !parser.lexer.next()
+  doAssert tkName.kind == tokIdent, "Expected identifier" # TODO: report,
+                                                          #       detailed
+  doAssert (!parser.lexer.next()).kind == tokColon, "Colon expected"
+  result.name = parser.lexer[tkName.span]
+  result.typ = box(parser.parseExpr(terminalTokens = {tokAssign}))
+
+proc parseLoc(parser: var Parser): VarDecl =
+  discard parser.lexer.next()
+  let field = parser.parseField()
+  result.name = field.name
+  result.typ = field.typ
+  if parser.lookahead.kind == tokAssign:
+    discard parser.lexer.next()
+    result.value = parser.parseExpr()
+    doAssert result.value.kind != exprNone, "Expected expression"
+  doAssert (!parser.lexer.next()).kind == tokSemicolon,
+           "Expected semicolon to terminate statement"
+
+proc parseBlock(parser: var Parser, termins = {tokEnd, tokEof}): Block[Stmt]
+
+proc parseIf(parser: var Parser): IfStmt =
+  # The structure of the if statemet is as follows
+  # if
+  # ?(cond1)
+  #   ... block1 ...
+  # ?(cond2)
+  #   ... block2 ...
+  # .
+  # .
+  # .
+  # ?(condn)
+  #   ... blockn ...
+  # ?()
+  #   ... block else...
+  # end
+  # NOTE: The else clause should be the last one
+  var elseReached = false
+  discard parser.lexer.next()
+  while parser.lookahead.kind.withas(kind) != tokEnd:
+    doAssert not elseReached, "The else clause should be the last one"
+    var clause: IfClause
+    doAssert kind == tokQuestion, "Question mark expected" # TODO: report
+    discard parser.lexer.next()
+    doAssert (!parser.lexer.next()).kind == tokLParen,
+             "Expected open parenthesis"
+    clause.cond = parser.parseExpr()
+    if clause.cond.kind == exprNone: elseReached = true
+    doAssert (!parser.lexer.next()).kind == tokRParen,
+             "Expected close parenthesis"
+    clause.body = parser.parseBlock({tokQuestion})
+    result.add(clause)
+
+proc parseForLoop(parser: var Parser): ForLoop =
+  result.init = parser.parseLoc()
+  doAssert (!parser.lexer.next()).kind == tokSemicolon,
+           "Expected semicolon separator"
+  result.cond = parser.parseExpr()
+  doAssert (!parser.lexer.next()).kind == tokSemicolon,
+           "Expected semicolon separator"
+  result.step = parser.parseExpr()
+  doAssert (!parser.lexer.next()).kind == tokRParen,
+           "Expected closing parenthesis"
+  result.body = parser.parseBlock()
+  doAssert (!parser.lexer.next()).kind == tokEnd, "Expected end terminator"
+
+proc parseForInLoop(parser: var Parser): ForInLoop = todo("for...in loops")
+
+proc parseFor(parser: var Parser): Stmt =
+  # for loops:
+  # either
+  # for (a in b) # no loc
+  #   ... body ...
+  # end
+  # or
+  # for (loc i = 0; i < j; i = i + 1) # with loc
+  #   ... body ...
+  # end
+  discard parser.lexer.next()
+  doAssert (!parser.lexer.next()).kind == tokLParen,
+           "Expected open parenthesis"
+  if parser.lookahead.kind == tokLoc:
+    result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
+  else:
+    result = Stmt(kind: stmtForInLoop, forinl: parser.parseForInLoop())
+
+proc parseFcDecl(parser: var Parser): FcDecl =
+  todo("Function declaration parsing")
+
+proc parseStmt*(parser: var Parser): Stmt =
+  case parser.lookahead.kind
+  of tokIf:
+    result = Stmt(kind: stmtIf, ifs: parser.parseIf())
+  of tokFor:
+    result = parser.parseFor()
+  of tokLoc:
+    result = Stmt(kind: stmtVarDecl, varDecl: parser.parseLoc())
+  else:
+    result = Stmt(kind: stmtExpr, expr: parser.parseExpr())
+    doAssert (!parser.lexer.next()).kind == tokSemicolon,
+             "Expected semicolon to terminate statement"
+
+proc parseBlock(
+  parser: var Parser,
+  termins = {tokEnd, tokEof}
+): Block[Stmt] =
+  let terminalTokens = termins + {tokEnd, tokEof}
+  result = initBlock[Stmt]()
+  while parser.lookahead.kind notin terminalTokens:
+    let stmt = parser.parseStmt()
+    result.code.add(stmt)

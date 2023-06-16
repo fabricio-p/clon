@@ -135,19 +135,33 @@ suite "clon/parser":
         parser.lexer = initLexer("a = b + c = d")
         expr = parser.parseExpr()
         check expr.kind == exprOp
-        check expr.op.kind == opPlus
-        check expr.op.operands[0].kind == exprOp
-        check expr.op.operands[0].op.kind == opAssign
-        check expr.op.operands[0].op.operands[0].kind == exprIdent
-        check expr.op.operands[0].op.operands[0].ident == "a"
-        check expr.op.operands[0].op.operands[1].kind == exprIdent
-        check expr.op.operands[0].op.operands[1].ident == "b"
+        check expr.op.kind == opAssign
+        check expr.op.operands[0].kind == exprIdent
+        check expr.op.operands[0].ident == "a"
         check expr.op.operands[1].kind == exprOp
-        check expr.op.operands[1].op.kind == opAssign
+        check expr.op.operands[1].op.kind == opPlus
         check expr.op.operands[1].op.operands[0].kind == exprIdent
-        check expr.op.operands[1].op.operands[0].ident == "c"
-        check expr.op.operands[1].op.operands[1].kind == exprIdent
-        check expr.op.operands[1].op.operands[1].ident == "d"
+        check expr.op.operands[1].op.operands[0].ident == "b"
+        check expr.op.operands[1].op.operands[1].kind == exprOp
+        check expr.op.operands[1].op.operands[1].op.kind == opAssign
+        check expr
+                .op
+                .operands[1]
+                .op
+                .operands[1]
+                .op
+                .operands[0]
+                .kind == exprIdent
+        check expr.op.operands[1].op.operands[1].op.operands[0].ident == "c"
+        check expr
+                .op
+                .operands[1]
+                .op
+                .operands[1]
+                .op
+                .operands[1]
+                .kind == exprIdent
+        check expr.op.operands[1].op.operands[1].op.operands[1].ident == "d"
       test "index":
         parser.lexer = initLexer("a[b]")
         expr = parser.parseExpr()
@@ -295,3 +309,92 @@ suite "clon/parser":
         check stmt.ifs[1].body.code[0].expr.op.operands[1].kind == exprLit
         check stmt.ifs[1].body.code[0].expr.op.operands[1].lit.kind == litInt
         check stmt.ifs[1].body.code[0].expr.op.operands[1].lit.i == 30
+      test "with else clause":
+        parser.lexer = initLexer("""
+        if
+        ?(cond)
+           body;
+        ?()
+           elsebody;
+        end
+        """)
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtIf
+        check stmt.ifs.len == 2
+        check stmt.ifs[0].cond.kind == exprIdent
+        check stmt.ifs[0].cond.ident == "cond"
+        check stmt.ifs[0].body.code.len == 1
+        check stmt.ifs[0].body.code[0].kind == stmtExpr
+        check stmt.ifs[0].body.code[0].expr.kind == exprIdent
+        check stmt.ifs[0].body.code[0].expr.ident == "body"
+        check stmt.ifs[1].cond.kind == exprNone
+        check stmt.ifs[1].body.code.len == 1
+        check stmt.ifs[1].body.code[0].kind == stmtExpr
+        check stmt.ifs[1].body.code[0].expr.kind == exprIdent
+        check stmt.ifs[1].body.code[0].expr.ident == "elsebody"
+    suite "for":
+      var
+        parser: Parser
+        stmt: Stmt
+      test "classic for":
+        parser.lexer = initLexer("""
+        for (loc i:int = 0; i < n; i = i + 1)
+           foo;
+        end
+        """)
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtForLoop
+        # .init
+        #   .name
+        check stmt.forl.init.name == "i"
+        #   .typ
+        check stmt.forl.init.typ.kind == exprIdent
+        check stmt.forl.init.typ.ident == "int"
+        #   .value
+        check stmt.forl.init.value.kind == exprLit
+        check stmt.forl.init.value.lit.kind == litInt
+        check stmt.forl.init.value.lit.i == 0
+        # .cond
+        check stmt.forl.cond.kind == exprOp
+        check stmt.forl.cond.op.kind == opLt
+        check stmt.forl.cond.op.operands.len == 2
+        check stmt.forl.cond.op.operands[0].kind == exprIdent
+        check stmt.forl.cond.op.operands[0].ident == "i"
+        check stmt.forl.cond.op.operands[1].kind == exprIdent
+        check stmt.forl.cond.op.operands[1].ident == "n"
+        # .step
+        check stmt.forl.step.kind == exprOp
+        check stmt.forl.step.op.kind == opAssign
+        check stmt.forl.step.op.operands.len == 2
+        check stmt.forl.step.op.operands[0].kind == exprIdent
+        check stmt.forl.step.op.operands[0].ident == "i"
+        check stmt.forl.step.op.operands[1].kind == exprOp
+        check stmt.forl.step.op.operands[1].op.kind == opPlus
+        check stmt.forl.step.op.operands[1].op.operands.len == 2
+        check stmt.forl.step.op.operands[1].op.operands[0].kind == exprIdent
+        check stmt.forl.step.op.operands[1].op.operands[0].ident == "i"
+        check stmt.forl.step.op.operands[1].op.operands[1].kind == exprLit
+        check stmt.forl.step.op.operands[1].op.operands[1].lit.kind == litInt
+        check stmt.forl.step.op.operands[1].op.operands[1].lit.i == 1
+        check stmt.forl.body.code.len == 1
+        check stmt.forl.body.code[0].kind == stmtExpr
+        check stmt.forl.body.code[0].expr.kind == exprIdent
+        check stmt.forl.body.code[0].expr.ident == "foo"
+      test "for..in":
+        parser.lexer = initLexer("""
+        for (item in array)
+           print(item);
+        end
+        """)
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtForInLoop
+        check stmt.forinl.capture == "item"
+        check stmt.forinl.iter.kind == exprIdent
+        check stmt.forinl.iter.ident == "array"
+        check stmt.forinl.body.code.len == 1
+        check stmt.forinl.body.code[0].kind == stmtExpr
+        check stmt.forinl.body.code[0].expr.kind == exprFcCall
+        check stmt.forinl.body.code[0].expr.fcCall.callee.kind == exprIdent
+        check stmt.forinl.body.code[0].expr.fcCall.callee.ident == "print"
+        check stmt.forinl.body.code[0].expr.fcCall.args[0].kind == exprIdent
+        check stmt.forinl.body.code[0].expr.fcCall.args[0].ident == "item"

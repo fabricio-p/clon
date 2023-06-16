@@ -22,6 +22,7 @@ type
     tokIf        = "if"
     tokWhl       = "whl"
     tokFor       = "for"
+    tokIn        = "in"
     tokCase      = "case"
     tokBox       = "box"
     tokRet       = "ret"
@@ -73,6 +74,7 @@ const
     "if": tokIf,
     "whl": tokWhl,
     "for": tokFor,
+    "in": tokIn,
     "case": tokCase,
     "box": tokBox,
     "ret": tokRet,
@@ -300,6 +302,10 @@ proc next*(lexer: var Lexer): (Token, Status) =
                          of '*': tokAsterisk
                          of '/': tokSlash
                          else  : tokEOF
+
+proc revert*(lexer: var Lexer, token: Token, pos: Pos) =
+  lexer.token = token
+  lexer.pos = pos
 
 iterator items*(lexer: var Lexer): Token =
   while lexer.token.kind != tokEOF and

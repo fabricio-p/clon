@@ -88,8 +88,9 @@ type
     init*: VarDecl
     step*: Expr
   ForInLoop* = object
-    capture*: Expr
+    capture*: string
     iter*: Expr
+    body*: Block[Stmt]
   StmtKind* = enum
     stmtNone
     stmtExpr

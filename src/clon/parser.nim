@@ -20,8 +20,11 @@ type
 template at(parser: Parser, offset: int): untyped = parser.lexer.src[offset]
 template lookahead(parser: Parser): Token = parser.lexer.token
 
-proc fatalError(lexer: typedesc[Lexer], pos: Pos,
-                status: Status) {.noreturn.} =
+proc fatalError(
+  lexer: typedesc[Lexer],
+  pos: Pos,
+  status: Status
+) {.noreturn.} =
   raise newException(Defect):
           "Lexer error: {status.symbolName}\nAt: {pos.line}".fmt
 
@@ -147,18 +150,18 @@ let
     var precs: array[OpKind, (Precedence, Precedence)]
     let mapping = {
       opNone:     (-1, -1),
-      opOr:       ( 1,  2),
-      opAnd:      ( 3,  4),
-      opEq:       ( 5,  6),
-      opGt:       ( 7,  8),
-      opLt:       ( 7,  8),
-      opGe:       ( 7,  8),
-      opLe:       ( 7,  8),
-      opPlus:     ( 9, 10),
-      opMinus:    ( 9, 10),
-      opAsterisk: (11, 12),
-      opSlash:    (11, 12),
-      opAssign:   (14, 13),
+      opAssign:   (14,  1),
+      opOr:       ( 2,  3),
+      opAnd:      ( 4,  5),
+      opEq:       ( 6,  7),
+      opGt:       ( 8,  9),
+      opLt:       ( 8,  9),
+      opGe:       ( 8,  9),
+      opLe:       ( 8,  9),
+      opPlus:     (10, 11),
+      opMinus:    (10, 11),
+      opAsterisk: (12, 13),
+      opSlash:    (12, 13),
       opDot:      (19, 20),
     }
     for (kind, prec) in mapping:
@@ -170,7 +173,7 @@ let
 proc parseExpr*(
   parser: var Parser,
   minPrec = Precedence.low,
-  terminalTokens = {tokEof, tokEnd}
+  terminalTokens: set[TokenKind] = {}
 ): Expr
 
 # 
@@ -211,6 +214,7 @@ proc primaryExpr(parser: var Parser): Expr =
   of tokEof:
     result = Expr(kind: exprNone)
   else:
+    echo parser.lookahead
     todo("Either invalid or not-yet-handled token")
 
 proc fcArgs(parser: var Parser): seq[Expr] =
@@ -248,9 +252,16 @@ func toPostOp(kind: TokenKind): OpKind {.inline.} =
 proc parseExpr(
   parser: var Parser,
   minPrec = Precedence.low,
-  terminalTokens = {tokEof, tokEnd}
+  terminalTokens: set[TokenKind] = {}
 ): Expr =
-  let terminalTokens = terminalTokens + {tokEof, tokEnd}
+  let terminalTokens = terminalTokens + {
+    tokEof,
+    tokEnd,
+    tokSemicolon,
+    tokRParen,
+    tokRBracket,
+    tokRBrace
+  }
   result =
     if parser.lookahead.kind.withas(pref) in PrefixOpTokens:
       discard parser.lexer.next()
@@ -311,7 +322,7 @@ proc parseLoc(parser: var Parser): VarDecl =
   doAssert (!parser.lexer.next()).kind == tokSemicolon,
            "Expected semicolon to terminate statement"
 
-proc parseBlock(parser: var Parser, termins = {tokEnd, tokEof}): Block[Stmt]
+proc parseBlock(parser: var Parser, termins: set[TokenKind] = {}): Block[Stmt]
 
 proc parseIf(parser: var Parser): IfStmt =
   # The structure of the if statemet is as follows
@@ -338,8 +349,8 @@ proc parseIf(parser: var Parser): IfStmt =
     discard parser.lexer.next()
     doAssert (!parser.lexer.next()).kind == tokLParen,
              "Expected open parenthesis"
-    clause.cond = parser.parseExpr()
-    if clause.cond.kind == exprNone: elseReached = true
+    if parser.lookahead.kind == tokRParen: elseReached = true
+    else: clause.cond = parser.parseExpr()
     doAssert (!parser.lexer.next()).kind == tokRParen,
              "Expected close parenthesis"
     clause.body = parser.parseBlock({tokQuestion})
@@ -347,8 +358,6 @@ proc parseIf(parser: var Parser): IfStmt =
 
 proc parseForLoop(parser: var Parser): ForLoop =
   result.init = parser.parseLoc()
-  doAssert (!parser.lexer.next()).kind == tokSemicolon,
-           "Expected semicolon separator"
   result.cond = parser.parseExpr()
   doAssert (!parser.lexer.next()).kind == tokSemicolon,
            "Expected semicolon separator"
@@ -357,8 +366,6 @@ proc parseForLoop(parser: var Parser): ForLoop =
            "Expected closing parenthesis"
   result.body = parser.parseBlock()
   doAssert (!parser.lexer.next()).kind == tokEnd, "Expected end terminator"
-
-proc parseForInLoop(parser: var Parser): ForInLoop = todo("for...in loops")
 
 proc parseFor(parser: var Parser): Stmt =
   # for loops:
@@ -373,10 +380,25 @@ proc parseFor(parser: var Parser): Stmt =
   discard parser.lexer.next()
   doAssert (!parser.lexer.next()).kind == tokLParen,
            "Expected open parenthesis"
-  if parser.lookahead.kind == tokLoc:
-    result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
+  if parser.lookahead.kind == tokIdent:
+    let
+      preIdentPos = parser.lexer.pos
+      identToken = !parser.lexer.next()
+      ident = parser.lexer[identToken.span]
+    if parser.lookahead.kind == tokIn:
+      discard parser.lexer.next()
+      let iter = parser.parseExpr()
+      doAssert (!parser.lexer.next()).kind == tokRParen,
+               "Expected closing parenthesis"
+      let body = parser.parseBlock()
+      result = Stmt(kind: stmtForInLoop,
+                    forinl: ForInLoop(capture: ident, iter: iter, body: body))
+    else:
+      # a kind of a dirty way of >1 lookaheading
+      parser.lexer.revert(identToken, preIdentPos)
+      result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
   else:
-    result = Stmt(kind: stmtForInLoop, forinl: parser.parseForInLoop())
+    result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
 
 proc parseFcDecl(parser: var Parser): FcDecl =
   todo("Function declaration parsing")
@@ -396,7 +418,7 @@ proc parseStmt*(parser: var Parser): Stmt =
 
 proc parseBlock(
   parser: var Parser,
-  termins = {tokEnd, tokEof}
+  termins: set[TokenKind] = {}
 ): Block[Stmt] =
   let terminalTokens = termins + {tokEnd, tokEof}
   result = initBlock[Stmt]()

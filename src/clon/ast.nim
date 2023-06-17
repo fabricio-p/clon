@@ -40,9 +40,13 @@ type
   Op* = object
     kind*: OpKind
     operands*: seq[Expr]
+  Block*[T] = object
+    scope*: Scope
+    code*: seq[T]
   FcExpr* = object of RootObj
     params*: seq[Field]
-    body*: seq[Stmt]
+    ret*: Box[Expr]
+    body*: Block[Stmt]
   FcDecl* = object of FcExpr
     name*: string
   ExprKind* = enum
@@ -64,7 +68,7 @@ type
     of exprOP:
       op*: Op
     of exprFc:
-      fcExpr*: FcExpr
+      fc*: FcExpr
     of exprFcCall:
       fcCall*: FcCall
     else: discard
@@ -76,9 +80,6 @@ type
   BoxDecl* = object
     name*: string
     fields*: seq[Field]
-  Block*[T] = object
-    scope*: Scope
-    code*: seq[T]
   IfClause* = tuple[cond: Expr, body: Block[Stmt]]
   IfStmt* = seq[IfClause]
   WhlLoop* = object of RootObj

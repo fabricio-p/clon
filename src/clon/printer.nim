@@ -112,7 +112,7 @@ proc print*(f: File, expr: Expr, level: int = 0) =
     for operand in expr.op.operands:
       f.print(operand, level + 2)
   of exprFc:
-    f.print(expr.fcExpr, level)
+    f.print(expr.fc, level)
   of exprFcCall:
     f.swl("FcCall", resetStyle, ":")
     f.printIndent(level + 1)

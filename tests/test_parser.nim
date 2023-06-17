@@ -3,7 +3,7 @@ include clon/[parser, printer]
 
 suite "clon/parser":
   suite "expressions":
-    suite "expressions":
+    suite "primitives":
       var
         parser: Parser
         expr: Expr
@@ -191,6 +191,54 @@ suite "clon/parser":
         check expr.op.operands[1].ident == "b"
         check expr.op.operands[2].kind == exprIdent
         check expr.op.operands[2].ident == "def"
+    suite "function expression":
+      var
+        parser: Parser
+        expr: Expr
+      test "no parameters, no return":
+        parser.lexer = initLexer("fc() end")
+        expr = parser.parseExpr()
+        check expr.kind == exprFc
+        check expr.fc.params.len == 0
+        check expr.fc.ret.isEmpty()
+        check expr.fc.body.code.len == 0
+      test "no parameters, with return":
+        parser.lexer = initLexer("fc(): void end")
+        expr = parser.parseExpr()
+        check expr.kind == exprFc
+        check expr.fc.params.len == 0
+        check expr.fc.ret.kind == exprIdent
+        check expr.fc.ret.ident == "void"
+        check expr.fc.body.code.len == 0
+      test "with parameters, no return":
+        parser.lexer = initLexer("fc(a:int, b:int) end")
+        expr = parser.parseExpr()
+        check expr.kind == exprFc
+        check expr.fc.params.len == 2
+        check expr.fc.params[0].name == "a"
+        check expr.fc.params[0].typ.kind == exprIdent
+        check expr.fc.params[0].typ.ident == "int"
+        check expr.fc.params[1].name == "b"
+        check expr.fc.params[1].typ.kind == exprIdent
+        check expr.fc.params[1].typ.ident == "int"
+        check expr.fc.ret.isEmpty()
+        check expr.fc.body.code.len == 0
+      test "with parameters, with return":
+        parser.lexer = initLexer("fc(foo: string): LinkedList[char] end")
+        expr = parser.parseExpr()
+        check expr.kind == exprFc
+        check expr.fc.params.len == 1
+        check expr.fc.params[0].name == "foo"
+        check expr.fc.params[0].typ.kind == exprIdent
+        check expr.fc.params[0].typ.ident == "string"
+        check expr.fc.ret.kind == exprOp
+        check expr.fc.ret.op.kind == opIndex
+        check expr.fc.ret.op.operands.len == 2
+        check expr.fc.ret.op.operands[0].kind == exprIdent
+        check expr.fc.ret.op.operands[0].ident == "LinkedList"
+        check expr.fc.ret.op.operands[1].kind == exprIdent
+        check expr.fc.ret.op.operands[1].ident == "char"
+        check expr.fc.body.code.len == 0
     suite "function call":
       var
         parser: Parser
@@ -234,6 +282,15 @@ suite "clon/parser":
         check expr.fcCall.args[1].fcCall.args[0].ident == "e"
         check expr.fcCall.args[1].fcCall.args[1].kind == exprIdent
         check expr.fcCall.args[1].fcCall.args[1].ident == "f"
+      test "call function expression":
+        parser.lexer = initLexer("(fc() end)()")
+        expr = parser.parseExpr()
+        check expr.kind == exprFcCall
+        check expr.fcCall.callee.kind == exprFc
+        check expr.fcCall.callee.fc.params.len == 0
+        check expr.fcCall.callee.fc.ret.isEmpty()
+        check expr.fcCall.callee.fc.body.code.len == 0
+        check expr.fcCall.args.len == 0
   suite "statements":
     suite "loc":
       var
@@ -398,3 +455,97 @@ suite "clon/parser":
         check stmt.forinl.body.code[0].expr.fcCall.callee.ident == "print"
         check stmt.forinl.body.code[0].expr.fcCall.args[0].kind == exprIdent
         check stmt.forinl.body.code[0].expr.fcCall.args[0].ident == "item"
+    suite "return":
+      var
+        parser: Parser
+        stmt: Stmt
+      test "with value":
+        parser.lexer = initLexer("ret foo;")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtRet
+        check stmt.ret.kind == exprIdent
+        check stmt.ret.ident == "foo"
+      test "without value":
+        parser.lexer = initLexer("ret;")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtRet
+        check stmt.ret.kind == exprNone
+    suite "fc":
+      var
+        parser: Parser
+        stmt: Stmt
+      test "no parameters, no return":
+        parser.lexer = initLexer("fc foo() end")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtFcDecl
+        check stmt.fcDecl.name == "foo"
+        check stmt.fcDecl.params.len == 0
+        check stmt.fcDecl.ret.isEmpty()
+        check stmt.fcDecl.body.code.len == 0
+      test "no parameters, with return":
+        parser.lexer = initLexer("fc bar(): void end")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtFcDecl
+        check stmt.fcDecl.name == "bar"
+        check stmt.fcDecl.params.len == 0
+        check stmt.fcDecl.ret.kind == exprIdent
+        check stmt.fcDecl.ret.ident == "void"
+        check stmt.fcDecl.body.code.len == 0
+      test "with parameters, no return":
+        parser.lexer = initLexer("fc baz(a:int, b:int) end")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtFcDecl
+        check stmt.fcDecl.name == "baz"
+        check stmt.fcDecl.params.len == 2
+        check stmt.fcDecl.params[0].name == "a"
+        check stmt.fcDecl.params[0].typ.kind == exprIdent
+        check stmt.fcDecl.params[0].typ.ident == "int"
+        check stmt.fcDecl.params[1].name == "b"
+        check stmt.fcDecl.params[1].typ.kind == exprIdent
+        check stmt.fcDecl.params[1].typ.ident == "int"
+        check stmt.fcDecl.ret.isEmpty()
+        check stmt.fcDecl.body.code.len == 0
+      test "with parameters, with return":
+        parser.lexer = initLexer("fc buz(foo: string): LinkedList[char] end")
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtFcDecl
+        check stmt.fcDecl.name == "buz"
+        check stmt.fcDecl.params.len == 1
+        check stmt.fcDecl.params[0].name == "foo"
+        check stmt.fcDecl.params[0].typ.kind == exprIdent
+        check stmt.fcDecl.params[0].typ.ident == "string"
+        check stmt.fcDecl.ret.kind == exprOp
+        check stmt.fcDecl.ret.op.kind == opIndex
+        check stmt.fcDecl.ret.op.operands.len == 2
+        check stmt.fcDecl.ret.op.operands[0].kind == exprIdent
+        check stmt.fcDecl.ret.op.operands[0].ident == "LinkedList"
+        check stmt.fcDecl.ret.op.operands[1].kind == exprIdent
+        check stmt.fcDecl.ret.op.operands[1].ident == "char"
+        check stmt.fcDecl.body.code.len == 0
+      test "with body":
+        parser.lexer = initLexer("""
+        fc addi(a: int, b: int): int
+           ret a + b;
+        end
+        """)
+        stmt = parser.parseStmt()
+        check stmt.kind == stmtFcDecl
+        check stmt.fcDecl.name == "addi"
+        check stmt.fcDecl.params.len == 2
+        check stmt.fcDecl.params[0].name == "a"
+        check stmt.fcDecl.params[0].typ.kind == exprIdent
+        check stmt.fcDecl.params[0].typ.ident == "int"
+        check stmt.fcDecl.params[1].name == "b"
+        check stmt.fcDecl.params[1].typ.kind == exprIdent
+        check stmt.fcDecl.params[1].typ.ident == "int"
+        check stmt.fcDecl.ret.kind == exprIdent
+        check stmt.fcDecl.ret.ident == "int"
+        check stmt.fcDecl.body.code.len == 1
+        check stmt.fcDecl.body.code[0].kind == stmtRet
+        check stmt.fcDecl.body.code[0].ret.kind == exprOp
+        check stmt.fcDecl.body.code[0].ret.op.kind == opPlus
+        check stmt.fcDecl.body.code[0].ret.op.operands.len == 2
+        check stmt.fcDecl.body.code[0].ret.op.operands[0].kind == exprIdent
+        check stmt.fcDecl.body.code[0].ret.op.operands[0].ident == "a"
+        check stmt.fcDecl.body.code[0].ret.op.operands[1].kind == exprIdent
+        check stmt.fcDecl.body.code[0].ret.op.operands[1].ident == "b"

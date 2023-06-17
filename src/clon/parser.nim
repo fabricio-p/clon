@@ -11,6 +11,8 @@ import questionable/options
 # project modules
 import ./lexer, ./ast, ./box, ./util # , ./error_reporter, ./env
 
+# TODO: Replace all `doAssert`s with propper error reporting
+
 type
   Parser* = object
     lexer*: Lexer
@@ -20,11 +22,9 @@ type
 template at(parser: Parser, offset: int): untyped = parser.lexer.src[offset]
 template lookahead(parser: Parser): Token = parser.lexer.token
 
-proc fatalError(
-  lexer: typedesc[Lexer],
-  pos: Pos,
-  status: Status
-) {.noreturn.} =
+proc fatalError(lexer: typedesc[Lexer],
+                pos: Pos,
+                status: Status) {.noreturn.} =
   raise newException(Defect):
           "Lexer error: {status.symbolName}\nAt: {pos.line}".fmt
 
@@ -170,20 +170,43 @@ let
   precPrefix = Precedence(17)
   precPostfix = Precedence(18)
 
-proc parseExpr*(
-  parser: var Parser,
-  minPrec = Precedence.low,
-  terminalTokens: set[TokenKind] = {}
-): Expr
+proc parseExpr*(parser: var Parser,
+                minPrec = Precedence.low,
+                terminalTokens: set[TokenKind] = {}): Expr
+proc parseBlock(parser: var Parser, termins: set[TokenKind] = {}): Block[Stmt]
 
-# 
-# proc parseFcCallArgs(parser: var Parser, env: var Env): seq[Expr] =
-#   while not parser.lexer.token.kind == tokComma:
-#     discard parser.lexer.next() # the first time it skips '(' and then it keeps
-#                              # skipping the commas
-#     result.add(parseExpr(parser))
-#   if parser.lexer.token.kind != tokRParen:
-#     discard
+proc parseFcBlock[TF: FcExpr or FcDecl](parser: var Parser): TF =
+  discard parser.lexer.next()
+  when TF is FcDecl:
+    doAssert parser.lookahead.kind == tokIdent,
+             "Expected function name"
+    result.name = parser.lexer[(!parser.lexer.next()).span]
+  doAssert (!parser.lexer.next()).kind == tokLParen,
+           "Expected open parenthesis"
+  if parser.lookahead.kind != tokRParen: result.params = @[]
+  while parser.lookahead.kind notin {tokRParen, tokEof}:
+    doAssert parser.lookahead.kind == tokIdent,
+             "Expected parameter name"
+    let name = parser.lexer[(!parser.lexer.next()).span]
+    doAssert (!parser.lexer.next()).kind == tokColon,
+             "Expected ':'"
+    let typ = parser.parseExpr()
+    doAssert typ.kind != exprNone,
+             "Expected parameter type"
+    result.params.add(Field(name: name, typ: box(typ)))
+    if parser.lookahead.kind == tokComma:
+      discard parser.lexer.next()
+    else:
+      doAssert parser.lookahead.kind == tokRParen,
+               "Expected either comma or closing parenthesis"
+  doAssert (!parser.lexer.next()).kind == tokRParen,
+           "Expected closing parenthesis"
+  if parser.lookahead.kind == tokColon:
+    discard parser.lexer.next()
+    result.ret = box(parser.parseExpr())
+  result.body = parser.parseBlock()
+  doAssert (!parser.lexer.next()).kind == tokEnd,
+           "Expected 'end' block terminator"
 
 proc primaryExpr(parser: var Parser): Expr =
   let kind = parser.lookahead.kind
@@ -210,7 +233,7 @@ proc primaryExpr(parser: var Parser): Expr =
   of InfixOpTokens:
     quit("Expected expression, found infix operator", QuitFailure)
   of tokFc:
-    todo("Function parsing")
+    result = Expr(kind: exprFc, fc: parser.parseFcBlock[:FcExpr]())
   of tokEof:
     result = Expr(kind: exprNone)
   else:
@@ -233,9 +256,6 @@ proc parseFcCall(parser: var Parser, callee: sink Expr): Expr =
            "Expected closing parenthesis (function call)" # TODO: Report,
                                                           #       detailed
 
-proc parseFcExpr(parser: var Parser): FcExpr =
-  todo("Function expression/value parsing")
-
 func toPrefOp(kind: TokenKind): OpKind {.inline.} =
   case kind
   of tokMinus: opMinus
@@ -249,11 +269,9 @@ func toInOp(kind: TokenKind): OpKind {.inline.} =
 func toPostOp(kind: TokenKind): OpKind {.inline.} =
   opNone
 
-proc parseExpr(
-  parser: var Parser,
-  minPrec = Precedence.low,
-  terminalTokens: set[TokenKind] = {}
-): Expr =
+proc parseExpr(parser: var Parser,
+               minPrec = Precedence.low,
+               terminalTokens: set[TokenKind] = {}) : Expr =
   let terminalTokens = terminalTokens + {
     tokEof,
     tokEnd,
@@ -321,8 +339,6 @@ proc parseLoc(parser: var Parser): VarDecl =
     doAssert result.value.kind != exprNone, "Expected expression"
   doAssert (!parser.lexer.next()).kind == tokSemicolon,
            "Expected semicolon to terminate statement"
-
-proc parseBlock(parser: var Parser, termins: set[TokenKind] = {}): Block[Stmt]
 
 proc parseIf(parser: var Parser): IfStmt =
   # The structure of the if statemet is as follows
@@ -400,9 +416,6 @@ proc parseFor(parser: var Parser): Stmt =
   else:
     result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
 
-proc parseFcDecl(parser: var Parser): FcDecl =
-  todo("Function declaration parsing")
-
 proc parseStmt*(parser: var Parser): Stmt =
   case parser.lookahead.kind
   of tokIf:
@@ -411,15 +424,39 @@ proc parseStmt*(parser: var Parser): Stmt =
     result = parser.parseFor()
   of tokLoc:
     result = Stmt(kind: stmtVarDecl, varDecl: parser.parseLoc())
+  of tokWhl:
+    discard parser.lexer.next()
+    doAssert (!parser.lexer.next()).kind == tokLParen,
+             "Expected open parenthesis"
+    doAssert (!parser.lexer.next()).kind != tokRParen,
+             "Expected the condition expression"
+    let cond = parser.parseExpr()
+    doAssert (!parser.lexer.next()).kind == tokRParen,
+             "Expected closing parenthesis"
+    let body = parser.parseBlock()
+    doAssert (!parser.lexer.next()).kind == tokEnd,
+             "Expected 'end' block teminator"
+    result = Stmt(kind: stmtWhlLoop, whll: WhlLoop(cond: cond, body: body))
+  of tokRet:
+    result = Stmt(kind: stmtRet)
+    discard parser.lexer.next()
+    if parser.lookahead.kind != tokSemicolon:
+      let expr = parser.parseExpr()
+      doAssert (!parser.lexer.next()).kind == tokSemicolon,
+               "Expected semicolon after expression"
+      result.ret = expr
+    else:
+      result.ret = Expr(kind: exprNone)
+      discard parser.lexer.next()
+  of tokFc:
+    result = Stmt(kind: stmtFcDecl, fcDecl: parser.parseFcBlock[:FcDecl]())
   else:
     result = Stmt(kind: stmtExpr, expr: parser.parseExpr())
     doAssert (!parser.lexer.next()).kind == tokSemicolon,
-             "Expected semicolon to terminate statement"
+             "Expected semicolon teminator"
 
-proc parseBlock(
-  parser: var Parser,
-  termins: set[TokenKind] = {}
-): Block[Stmt] =
+proc parseBlock(parser: var Parser,
+                termins: set[TokenKind] = {}): Block[Stmt] =
   let terminalTokens = termins + {tokEnd, tokEof}
   result = initBlock[Stmt]()
   while parser.lookahead.kind notin terminalTokens:

@@ -11,6 +11,9 @@ import questionable/options
 # project modules
 import ./lexer, ./ast, ./box, ./util # , ./error_reporter, ./env
 
+
+# TODO: Make better type parsing
+# NOTE: Maybe add `::` operator for namespacing and such
 # TODO: Replace all `doAssert`s with propper error reporting
 
 type
@@ -193,7 +196,7 @@ proc parseFcBlock[TF: FcExpr or FcDecl](parser: var Parser): TF =
     let typ = parser.parseExpr()
     doAssert typ.kind != exprNone,
              "Expected parameter type"
-    result.params.add(Field(name: name, typ: box(typ)))
+    result.params.add(Field(name: name, typ: typ))
     if parser.lookahead.kind == tokComma:
       discard parser.lexer.next()
     else:
@@ -326,7 +329,7 @@ proc parseField(parser: var Parser): Field =
                                                           #       detailed
   doAssert (!parser.lexer.next()).kind == tokColon, "Colon expected"
   result.name = parser.lexer[tkName.span]
-  result.typ = box(parser.parseExpr(terminalTokens = {tokAssign}))
+  result.typ = parser.parseExpr(terminalTokens = {tokAssign})
 
 proc parseLoc(parser: var Parser): VarDecl =
   discard parser.lexer.next()
@@ -450,6 +453,9 @@ proc parseStmt*(parser: var Parser): Stmt =
       discard parser.lexer.next()
   of tokFc:
     result = Stmt(kind: stmtFcDecl, fcDecl: parser.parseFcBlock[:FcDecl]())
+  of tokSemicolon:
+    discard parser.lexer.next()
+    result = Stmt(kind: stmtNone)
   else:
     result = Stmt(kind: stmtExpr, expr: parser.parseExpr())
     doAssert (!parser.lexer.next()).kind == tokSemicolon,
@@ -461,4 +467,4 @@ proc parseBlock(parser: var Parser,
   result = initBlock[Stmt]()
   while parser.lookahead.kind notin terminalTokens:
     let stmt = parser.parseStmt()
-    result.code.add(stmt)
+    if stmt.kind != stmtNone: result.code.add(stmt)

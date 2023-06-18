@@ -74,7 +74,7 @@ type
     else: discard
   Field* = object of RootObj
     name*: string
-    typ*: Box[Expr]
+    typ*: Expr
   VarDecl* = object of Field
     value*: Expr
   BoxDecl* = object

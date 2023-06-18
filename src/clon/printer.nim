@@ -45,45 +45,60 @@ const
   StrColor      = rgb(55, 255, 40)
   NumberColor   = rgb(255, 255, 60)
   OperatorColor = rgb(150, 170, 225)
+  #
+  StmtKindColor = rgb(255, 100, 100)
 
 template printIndent(f: File, indent: int): untyped =
   f.resetAttributes()
   f.setBackgroundColor(rgb(10, 10, 10))
   for i in 0..<indent:
     f.write("│")
-    for j in 0..<IndentWidth:
+    for j in 0 ..< IndentWidth - 1:
       f.write(' ')
   f.resetAttributes()
 
-proc print*(f: File, fc: FcDecl|FcExpr, level: int) =
-  todo("Function printing")
-#[
-proc print(f: File; fc: FcDecl|FcExpr; level: int) =
+proc print*(f: File, expr: Expr, level: int = 0)
+proc print*(f: File, stmt: Stmt, level: int = 0)
+
+proc print(f: File; fc: FcDecl|FcExpr; level: int = 0) =
   f.swl("Function", resetStyle, ":")
   when fc is FcDecl:
     f.printIndent(level + 1)
     f.swl(LabelColor, "name",
           resetStyle, ": ",
-          IdentColor, fc.name,
-          )
+          IdentColor, fc.name)
   f.printIndent(level.succ)
-  f.swl(LabelColor, "type", resetStyle, ":\n")
-  if fc.params.len != 0:
-    f.printIndent(level + 2)
-    f.swl(LabelColor, "parameters", resetStyle, ":\n")
-    for param in fc.params:
-      f.printIndent(level + 3)
-      f.sw(resetStyle, "> ",
-           IdentColor, param.name,
-           resetStyle, ": ",
-           TypeColor)
-      if param.typ.isSome():
-        f.swl(param.typ.get(), )
-      else:
-        f.swl("<N/A>", )
+  f.swl(LabelColor, "type", resetStyle, ":")
   f.printIndent(level + 2)
-  f.sw(LabelColor, "ret" resetStyle, ": ", TypeColor)
-]#
+  f.sw(LabelColor, "parameters", resetStyle, ":")
+  if fc.params.len != 0:
+    f.write('\n')
+    for param in fc.params:
+      f.printIndent(level + 2)
+      f.sw(bgWhite, " ", resetStyle,
+           IdentColor, param.name,
+           resetStyle, ":")
+      if param.typ.kind != exprNone:
+        f.write('\n')
+        f.print(param.typ, level + 3)
+      else:
+        f.swl(" ", KindColor, "<N/A>")
+  else:
+    f.swl(" ", KindColor, "-")
+  f.printIndent(level + 2)
+  f.sw(LabelColor, "ret", resetStyle, ":")
+  if fc.ret.isEmpty():
+    f.swl(" ", KindColor, "-")
+  else:
+    f.write('\n')
+    f.print(fc.ret.getRefUnsafe()[], level + 3)
+  f.printIndent(level + 1)
+  f.swl(LabelColor, "body", resetStyle, ":")
+  if fc.body.code.len == 0:
+    f.print(Stmt(kind: stmtNone), level + 2)
+  else:
+    for stmt in fc.body.code:
+      f.print(stmt, level + 2)
 
 proc print*(f: File, expr: Expr, level: int = 0) =
   f.printIndent(level)
@@ -123,3 +138,61 @@ proc print*(f: File, expr: Expr, level: int = 0) =
       f.swl(LabelColor, "arguments", resetStyle, ":")
       for arg in expr.fccall.args:
         f.print(arg, level + 2)
+
+proc print*(f: File, stmt: Stmt, level: int = 0) =
+  f.printIndent(level)
+  f.sw(fgColor)
+  f.setForegroundColor(StmtKindColor)
+  f.write("Statement/")
+  case stmt.kind
+  of stmtNone:
+    f.swl("None", resetStyle)
+  of stmtExpr:
+    f.swl("Expression", resetStyle, ":")
+    f.print(stmt.expr, level + 1)
+  of stmtVarDecl:
+    f.swl("Variable", resetStyle, ":")
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "name", resetStyle, ": ", IdentColor, stmt.varDecl.name)
+    f.printIndent(level + 1)
+    f.sw(LabelColor, "type", resetStyle, ":")
+    if stmt.varDecl.typ.kind == exprNone:
+      f.swl(" <N/A>")
+    else:
+      f.write('\n')
+      f.print(stmt.varDecl.typ, level + 2)
+    f.printIndent(level + 1)
+    f.sw(LabelColor, "value", resetStyle, ":")
+    if stmt.varDecl.value.kind == exprNone:
+      f.swl(" <N/A>")
+    else:
+      f.write('\n')
+      f.print(stmt.varDecl.value, level + 2)
+  of stmtIf:
+    f.sw("If", resetStyle, ":")
+    if stmt.ifs.len == 0:
+      f.swl(" ", LabelColor, "Empty")
+    else:
+      f.write('\n')
+      for (i, ifClause) in stmt.ifs.pairs:
+        f.printIndent(level + 1)
+        f.swl(bgWhite, " ", resetStyle,
+              LabelColor, "clause",
+              resetStyle, " [", $i, "]:")
+        f.printIndent(level + 2)
+        f.swl(LabelColor, "condition", resetStyle, ":")
+        f.print(ifClause.cond, level + 3)
+        f.printIndent(level + 2)
+        f.swl(LabelColor, "body", resetStyle, ":")
+        if ifClause.body.code.len == 0:
+          f.print(Stmt(kind: stmtNone), level + 3)
+        else:
+          for stmt in ifClause.body.code:
+            f.print(stmt, level + 3)
+  of stmtFcDecl:
+    f.print(stmt.fcDecl, level)
+  of stmtRet:
+    f.swl("Return", resetStyle, ":")
+    f.print(stmt.ret, level + 1)
+  else:
+    todo("Printing of other statements")

@@ -43,7 +43,7 @@ type
   Block*[T] = object
     scope*: Scope
     code*: seq[T]
-  FcExpr* = object of RootObj
+  FcExpr* {.pure, inheritable.} = object
     params*: seq[Field]
     ret*: Box[Expr]
     body*: Block[Stmt]
@@ -56,6 +56,7 @@ type
     exprOp
     exprFc
     exprFcCall
+    exprBracket
   FcCall* = object
     callee*:Box[Expr]
     args*: seq[Expr]
@@ -71,8 +72,10 @@ type
       fc*: FcExpr
     of exprFcCall:
       fcCall*: FcCall
+    of exprBracket:
+      bracket*: seq[Expr]
     else: discard
-  Field* = object of RootObj
+  Field* {.pure, inheritable.} = object
     name*: string
     typ*: Expr
   VarDecl* = object of Field
@@ -82,11 +85,11 @@ type
     fields*: seq[Field]
   IfClause* = tuple[cond: Expr, body: Block[Stmt]]
   IfStmt* = seq[IfClause]
-  WhlLoop* = object of RootObj
+  WhlLoop* {.pure, inheritable.} = object
     cond*: Expr
     body*: Block[Stmt]
   ForLoop* = object of WhlLoop
-    init*: VarDecl
+    init*: Box[Stmt]
     step*: Expr
   ForInLoop* = object
     capture*: string

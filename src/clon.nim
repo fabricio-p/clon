@@ -1,3 +1,4 @@
+import sequtils, strutils
 import clon/[ast, lexer, parser, printer]
 
 when isMainModule:
@@ -6,7 +7,11 @@ when isMainModule:
     pars: Parser
     stmt: Stmt
   while (stdout.write("clon> "); stdin.readLine(line)):
+    if line.len == 0 or line.allIt(it in Whitespace): continue
     pars.lexer = initLexer(line)
-    stmt = pars.parseStmt()
-    stdout.print(stmt)
+    try:
+      stmt = pars.parseStmt()
+      stdout.print(stmt)
+    except ParserError as perr:
+      echo perr.msg
   echo ""

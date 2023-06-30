@@ -1,5 +1,5 @@
 import colors, terminal
-import ./lexer, ./ast, ./box, ./util
+import ./lexer, ./ast, ./box
 
 enableTrueColors()
 
@@ -13,7 +13,7 @@ proc print*(f: File, token: Token, src: string) =
   f.sw("<", styleBright, fgRed, $token.kind, " ", )
   if token.kind in {tokIdent, tokStrLit, tokIntLit, tokFloatLit, tokChrLit}:
     f.sw(fgCyan, src[token.span.s.offset..<token.span.e.offset],
-                  resetStyle, " ")
+         resetStyle, " ")
   var
     startCol = 1
     endCol = 1
@@ -32,25 +32,27 @@ proc print*(f: File, token: Token, src: string) =
        ", col: ", $startCol,
        "}...{offset: ", $token.span.e.offset,
        ", line: ", $token.span.e.line,
-       ", col: ", $endCol,
-       "}", resetStyle, ">")
+       ", col: ", $endCol, "}",
+       resetStyle, ">")
 
 const
   IndentWidth   = 2
-  LabelColor    = rgb(255, 164, 0)
+  # general
+  IndentBgColor = rgb(10, 10, 10)
+  LabelColor    = rgb(255, 164,   0)
   IdentColor    = rgb(255, 130, 255)
-  # TypeColor     = rgb(210, 0, 0)
+  # expressions
   ExprKindColor = rgb(100, 255, 100)
   KindColor     = rgb(100, 100, 255)
-  StrColor      = rgb(55, 255, 40)
-  NumberColor   = rgb(255, 255, 60)
+  StrColor      = rgb( 55, 255,  40)
+  NumberColor   = rgb(255, 255,  60)
   OperatorColor = rgb(150, 170, 225)
-  #
+  # statements
   StmtKindColor = rgb(255, 100, 100)
 
 template printIndent(f: File, indent: int): untyped =
   f.resetAttributes()
-  f.setBackgroundColor(rgb(10, 10, 10))
+  f.setBackgroundColor(IndentBgColor)
   for i in 0..<indent:
     f.write("│")
     for j in 0 ..< IndentWidth - 1:
@@ -97,8 +99,8 @@ proc print(f: File; fc: FcDecl|FcExpr; level: int = 0) =
   if fc.body.code.len == 0:
     f.print(Stmt(kind: stmtNone), level + 2)
   else:
-    for stmt in fc.body.code:
-      f.print(stmt, level + 2)
+    for bodyStmt in fc.body.code:
+      f.print(bodyStmt, level + 2)
 
 proc print*(f: File, expr: Expr, level: int = 0) =
   f.printIndent(level)
@@ -114,6 +116,13 @@ proc print*(f: File, expr: Expr, level: int = 0) =
           resetStyle, "(",
           if expr.lit.kind == litStr: StrColor else: NumberColor, $expr.lit,
           resetStyle, ")")
+  of exprBracket:
+    f.swl("Bracket", resetStyle, ":")
+    if expr.bracket.len == 0:
+      f.print(Expr(kind: exprNone), level + 1)
+    else:
+      for bracketItem in expr.bracket:
+        f.print(bracketItem, level + 1)
   of exprIdent:
     f.swl("Identifier", resetStyle, ": ", IdentColor, expr.ident)
   of exprOp:
@@ -187,12 +196,56 @@ proc print*(f: File, stmt: Stmt, level: int = 0) =
         if ifClause.body.code.len == 0:
           f.print(Stmt(kind: stmtNone), level + 3)
         else:
-          for stmt in ifClause.body.code:
-            f.print(stmt, level + 3)
+          for bodyItem in ifClause.body.code:
+            f.print(bodyItem, level + 3)
+  of stmtForInLoop:
+    f.swl("ForIn", resetStyle, ":")
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "capture",
+          resetStyle, ": ",
+          IdentColor, stmt.forinl.capture)
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "iterator", resetStyle, ":")
+    f.print(stmt.forinl.iter, level + 2)
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "body", resetStyle, ":")
+    if stmt.forinl.body.code.len == 0:
+      f.print(Stmt(kind: stmtNone), level + 2)
+    else:
+      for bodyItem in stmt.forinl.body.code:
+        f.print(bodyItem, level + 2)
+  of stmtWhlLoop:
+    f.swl("While", resetStyle, ":")
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "condition", resetStyle, ":")
+    f.print(stmt.whll.cond, level + 2)
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "body", resetStyle, ":")
+    if stmt.whll.body.code.len == 0:
+      f.print(Stmt(kind: stmtNone), level + 2)
+    else:
+      for bodyItem in stmt.whll.body.code:
+        f.print(bodyItem, level + 2)
+  of stmtForLoop:
+    f.swl("For", resetStyle, ":")
+    f.printIndent(level + 1)
+    f.sw(LabelColor, "init", resetStyle, ":")
+    if stmt.forl.init.isEmpty():
+      f.print(Stmt(kind: stmtNone), level + 2)
+    else:
+      f.print(stmt.forl.init.getRefUnsafe()[])
+    f.printIndent(level + 1)
+    f.sw(LabelColor, "condition", resetStyle, ":")
+    f.print(stmt.forl.cond, level + 2)
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "body", ":")
+    if stmt.forl.body.code.len == 0:
+      f.print(Stmt(kind: stmtNone), level + 1)
+    else:
+      for bodyItem in stmt.forl.body.code:
+        f.print(bodyItem, level + 2)
   of stmtFcDecl:
     f.print(stmt.fcDecl, level)
   of stmtRet:
     f.swl("Return", resetStyle, ":")
     f.print(stmt.ret, level + 1)
-  else:
-    todo("Printing of other statements")

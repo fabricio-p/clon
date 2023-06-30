@@ -403,14 +403,15 @@ suite "clon/parser":
         check stmt.kind == stmtForLoop
         # .init
         #   .name
-        check stmt.forl.init.name == "i"
+        check stmt.forl.init.kind == stmtVarDecl
+        check stmt.forl.init.varDecl.name == "i"
         #   .typ
-        check stmt.forl.init.typ.kind == exprIdent
-        check stmt.forl.init.typ.ident == "int"
+        check stmt.forl.init.varDecl.typ.kind == exprIdent
+        check stmt.forl.init.varDecl.typ.ident == "int"
         #   .value
-        check stmt.forl.init.value.kind == exprLit
-        check stmt.forl.init.value.lit.kind == litInt
-        check stmt.forl.init.value.lit.i == 0
+        check stmt.forl.init.varDecl.value.kind == exprLit
+        check stmt.forl.init.varDecl.value.lit.kind == litInt
+        check stmt.forl.init.varDecl.value.lit.i == 0
         # .cond
         check stmt.forl.cond.kind == exprOp
         check stmt.forl.cond.op.kind == opLt

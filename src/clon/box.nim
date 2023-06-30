@@ -5,7 +5,7 @@ proc box*[T](value: sink T): Box[T] =
   new(result.data)
   result.data[] = value
 
-func getRefUnsafe*[T](box: Box[T]): ref T = result = box.data
+func getRefUnsafe*[T](box: Box[T]): ref T = box.data
 
 func isEmpty*[T](box: Box[T]): bool = isNil(box.data)
 

@@ -11,7 +11,8 @@ type
     UnterminatedChar = "Unterminated character literal"
     CharNewline
   TokenKind* = enum
-    tokEOF       = "EOF"
+    tokNone
+    tokEof       = "EOF"
     tokIntLit    = "$int"
     tokFloatLit  = "$float"
     tokStrLit    = "$str"
@@ -51,7 +52,7 @@ type
     tokComma     = ","
     tokColon     = ":"
     tokQuestion  = "?"
-    tokSemiColon = ";"
+    tokSemicolon = ";"
   Pos* = tuple[offset, line: int]
   Span* = tuple[s, e: Pos]
   Token* = object
@@ -85,9 +86,9 @@ const
   }.toTable
   Eof* = cast[char](uint8.high)
   EscapableChars* = {'r', 't', 'n', 'e', '0', '\\'}
-  InfixOpTokens* = {tokPlus..tokDot, tokLBracket}
+  InfixOpTokens* = { tokPlus..tokDot }
   PrefixOpTokens* = {tokMinus, tokNot}
-  PostfixOpTokens*: set[TokenKind] = {}
+  PostfixOpTokens*: set[TokenKind] = { #[ tokLBracket ]# }
 
 proc next*(lexer: var Lexer): (Token, Status)
 

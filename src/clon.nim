@@ -14,4 +14,5 @@ when isMainModule:
       stdout.print(stmt)
     except ParserError as perr:
       echo perr.msg
+      echo perr.getStackTrace()
   echo ""

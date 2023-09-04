@@ -1,4 +1,5 @@
 import colors, terminal
+import questionable/options
 import ./lexer, ./ast, ./box
 
 enableTrueColors()
@@ -42,9 +43,9 @@ const
   LabelColor    = rgb(255, 164,   0)
   IdentColor    = rgb(255, 130, 255)
   # expressions
-  ExprKindColor = rgb(100, 255, 100)
+  ExprKindColor = rgb(110, 255, 190)
   KindColor     = rgb(100, 100, 255)
-  StrColor      = rgb( 55, 255,  40)
+  StrColor      = rgb( 30, 200,  20)
   NumberColor   = rgb(255, 255,  60)
   OperatorColor = rgb(150, 170, 225)
   # statements
@@ -54,7 +55,7 @@ template printIndent(f: File, indent: int): untyped =
   f.resetAttributes()
   f.setBackgroundColor(IndentBgColor)
   for i in 0..<indent:
-    f.write("│")
+    f.write("┃")
     for j in 0 ..< IndentWidth - 1:
       f.write(' ')
   f.resetAttributes()
@@ -116,13 +117,6 @@ proc print*(f: File, expr: Expr, level: int = 0) =
           resetStyle, "(",
           if expr.lit.kind == litStr: StrColor else: NumberColor, $expr.lit,
           resetStyle, ")")
-  of exprBracket:
-    f.swl("Bracket", resetStyle, ":")
-    if expr.bracket.len == 0:
-      f.print(Expr(kind: exprNone), level + 1)
-    else:
-      for bracketItem in expr.bracket:
-        f.print(bracketItem, level + 1)
   of exprIdent:
     f.swl("Identifier", resetStyle, ": ", IdentColor, expr.ident)
   of exprOp:
@@ -147,6 +141,43 @@ proc print*(f: File, expr: Expr, level: int = 0) =
       f.swl(LabelColor, "arguments", resetStyle, ":")
       for arg in expr.fccall.args:
         f.print(arg, level + 2)
+  of exprFcType:
+    f.swl("FcType", resetStyle, ":")
+    f.printIndent(level + 1)
+    f.swl(LabelColor, "parameters", resetStyle, ":")
+    if expr.fcType.params.len == 0:
+      f.printIndent(level + 2)
+      f.swl(": -")
+    else:
+      for param in expr.fcType.params:
+        f.print(param, level + 2)
+    f.swl(LabelColor, "return", resetStyle, ":")
+    if expr.fcType.ret.isEmpty():
+      f.printIndent(level + 2)
+      f.swl(": -")
+    else:
+        f.print(expr.fcType.ret.getRefUnsafe[], level + 2)
+  of exprBracket:
+    f.swl("Bracket", resetStyle, ":")
+    if expr.bracket.len == 0:
+      f.print(Expr(kind: exprNone), level + 1)
+    else:
+      for bracketItem in expr.bracket:
+        f.print(bracketItem, level + 1)
+  of exprBoxVal:
+    f.swl("BoxVal", resetStyle, ":")
+    if expr.boxVal.len == 0:
+      f.print(Expr(kind: exprNone), level + 1)
+    else:
+      for (key, value) in expr.boxVal.items:
+        let valueLevel =
+          if keyVal =? key:
+            f.printIndent(level + 1)
+            f.swl(StrColor, keyVal, resetStyle, ": ")
+            level + 2
+          else:
+            level + 1
+        f.print(value, valueLevel)
 
 proc print*(f: File, stmt: Stmt, level: int = 0) =
   f.printIndent(level)

@@ -87,7 +87,7 @@ const
   Eof* = cast[char](uint8.high)
   EscapableChars* = {'r', 't', 'n', 'e', '0', '\\'}
   InfixOpTokens* = { tokPlus..tokDot }
-  PrefixOpTokens* = {tokMinus, tokNot}
+  PrefixOpTokens* = { tokMinus, tokNot }
   PostfixOpTokens*: set[TokenKind] = { #[ tokLBracket ]# }
 
 proc next*(lexer: var Lexer): (Token, Status)
@@ -246,7 +246,7 @@ proc lexChar(lexer: var Lexer) =
           InvalidEscSeq
       else: InvalidEscSeq
     else: Ok
-  if lexer.status.isOk and lexer.at(pos.offset) != '\'':
+  if lexer.status.isOk() and lexer.at(pos.offset) != '\'':
     lexer.status = UnterminatedChar
   else:
     inc pos.offset
@@ -257,11 +257,11 @@ proc lexChar(lexer: var Lexer) =
 proc next*(lexer: var Lexer): (Token, Status) =
   result = (lexer.token, lexer.status)
   lexer.pos = lexer.token.span.e
+  lexer.token.span.s = lexer.skipWhitespace()
+  lexer.token.span.e = lexer.token.span.s
   if lexer.pos.offset >= lexer.src.len:
     lexer.token = Token(kind: tokEOF, span: (lexer.pos, lexer.pos))
     return
-  lexer.token.span.s = lexer.skipWhitespace()
-  lexer.token.span.e = lexer.token.span.s
   let ch = lexer.current
   case ch
   of '0'..'9':
@@ -272,7 +272,7 @@ proc next*(lexer: var Lexer): (Token, Status) =
     else:
       inc lexer.token.span.e.offset
       # lexer.token.kind = if ch == '-': tokMinus else: tokPlus
-      lexer.token.kind = TokenKind(ord(tokMinus) - ord(ch == '+'))
+      lexer.token.kind = TokenKind(ord(tokPlus) + ord(ch == '-'))
   of '"':
     lexer.lexStr()
   of 'a'..'z', 'A'..'Z', '_':
@@ -310,5 +310,5 @@ proc revert*(lexer: var Lexer, token: Token, pos: Pos) =
 
 iterator items*(lexer: var Lexer): Token =
   while lexer.token.kind != tokEOF and
-    (let (t, s) = lexer.next(); s.isOk):
+    (let (t, s) = lexer.next(); s.isOk()):
     yield t

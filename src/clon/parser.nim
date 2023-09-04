@@ -1,224 +1,21 @@
-# stdlib
-from strutils import HexDigits, join, `%`
-from parseutils import parseHex,
-                       parseOct,
-                       parseBin,
-                       parseBiggestInt,
-                       parseFloat
-import strformat, terminal, sequtils, std/enumutils
+import strformat
 # nimble libs
 import questionable/options
 # project modules
-import ./lexer, ./ast, ./box, ./util # , ./error_reporter, ./env
+import ./parser/[common, expressions]
+export Parser, ParserError, ParserErrorKind
 
-
-# TODO: Make better type parsing
+# NOTE: It'd be nice to have a dependency graph of the parsing functions
 # NOTE: Maybe add `::` operator for namespacing and such
-
-type
-  Parser* = object
-    lexer*: Lexer
-    # ast*: Ast
-    # rep*: ErrReporter
-  ParserError* = object of CatchableError
-    # src: string
-    # span: Span
-  ParserErrorKind* = enum
-    peExpected = "Expected $#"
-    peExpectedVsFound = "Expected $#, found $#"
-    peUnexpected = "Unexpected $#"
-    peMissingType = "Type specification missing"
-    peElseNotLast = "The '?()' (aka. else) clause should be the last one"
-    peDuplicateElse = "Duplicate '?()' (aka. else) clause encountered"
-
-template at(parser: Parser, offset: int): untyped = parser.lexer.src[offset]
-template lookahead(parser: Parser): Token = parser.lexer.token
-
-proc fatalError(lexer: typedesc[Lexer],
-                pos: Pos,
-                status: Status) {.noreturn.} =
-  raise newException(
-    Defect,
-    fmt("Lexer error: {status.symbolName}\nAt: {pos.line}"))
-
-template `!`(tkResult: (Token, Status)): Token =
-  let (token, status) = tkResult
-  if status.isOk(): token
-  else:
-    fatalError(Lexer, token.span.e, status)
-
-# template `=!`(sym: untyped, tkResult: (Token, Status)): bool =
-#   (var `sym` = tkResult[0]; tkResult[1])
-
-func new(_: typedesc[ParserError],
-         kind: ParserErrorKind,
-         pos: (int, int),
-         args: varargs[string]): ref ParserError =
-  let
-    posText = fmt", at {pos[0]}:{pos[1]}"
-    message = ($kind % args) & posText
-  result = newException(ParserError, message)
-
-func getColumn(parser: Parser, pos: Pos): int =
-  result = 0
-  var offset = pos.offset - 1
-  while offset >= 0 and parser.lexer.src[offset] != '\n':
-    dec offset
-    inc result
-
-proc error(parser: Parser, kind: ParserErrorKind, args: varargs[string]) =
-  let pos = (parser.lookahead.span.s.line,
-             parser.getColumn(parser.lookahead.span.s))
-  raise ParserError.new(kind, pos, args)
-
-proc expect(parser: var Parser,
-            kinds: set[TokenKind],
-            consume: static[bool] = true): Token =
-  if parser.lookahead.kind notin kinds:
-    let kind = parser.lookahead.kind
-    parser.error(peExpectedVsFound,
-                 "any of the tokens in the list [" &
-                  kinds
-                    .mapIt(if it in {tokIntLit..tokIdent, tokEof}: $it
-                           else: "\"" & $it & "\"")
-                    .join(",") &
-                  "]",
-                 if kind in {tokIntLit..tokIdent, tokEof}:
-                   fmt"""{kind} "{parser.lexer[parser.lookahead.span]}""""
-                 else:
-                   "\"" & $parser.lookahead.kind & "\"")
-  elif consume:
-    result = !parser.lexer.next()
-  else:
-    result = parser.lookahead
-
-proc eat(parser: var Parser, kinds: set[TokenKind]): TokenKind =
-  if parser.lookahead.kind.withas(kind) in kinds:
-    discard parser.lexer.next()
-    result = kind
-  else:
-    result = tokNone
-
-proc expect(parser: var Parser,
-            kind: TokenKind,
-            consume: static[bool] = true): Token =
-  parser.expect({ kind }, consume)
-
-proc eat(parser: var Parser, kind: TokenKind): TokenKind =
-  parser.eat({ kind })
-
-proc missingType(parser: Parser) = parser.error(peMissingType)
-
-template `?`(tokenKind: TokenKind): bool = tokenKind != tokNone
 
 ###############################################################################
 #---------------------------- Expression parsing ----------------------------##
 ###############################################################################
 
-func biggestInt(s: openArray[char], n: var BiggestInt, _: int): int =
-  s.parseBiggestInt(n)
-
-proc intExpr(parser: var Parser): BiggestInt =
-  template fn(n: untyped): untyped =
-    proc(a: openArray[char], b: var BiggestInt, c: int): int =
-      `parse n`[BiggestInt](a, b, c)
-  let
-    tk = !parser.lexer.next()
-    start = tk.span.s.offset
-    finish = tk.span.e.offset
-    parseFn = if tk.span.e.offset - start >= 3 and parser.at(start) == '0':
-                case parser.at(start + 1)
-                of 'x', 'X': fn(Hex) # parseHex[BiggestInt]
-                of 'o', 'O': fn(Oct) # parseOct[BiggestInt]
-                of 'b', 'B': fn(Bin) # parseBin[BiggestInt]
-                else: biggestInt
-              else: biggestInt
-  discard parseFn(parser.lexer.src.toOpenArray(start, finish - 1),
-                  result, 0)
-
-proc floatExpr(parser: var Parser): float =
-  let
-    tk = !parser.lexer.next()
-    start = tk.span.s.offset
-  discard parseFloat(parser.lexer.src, result, start)
-
-proc escSeq(parser: var Parser, start: int): (?char, int) =
-  var offset = start
-  result[0] =
-    case parser.at(offset)
-    of 'r': some('\r')
-    of 'n': some('\n')
-    of 'e': some('\x1f')
-    of 't': some('\t')
-    of '\\': some('\\')
-    of '0': some('\0')
-    of 'x', 'X':
-      if offset + 2 < parser.lexer.src.len and
-        parser.at(offset + 1) in HexDigits and
-        parser.at(offset + 2) in HexDigits:
-        var hex: int
-        discard parser.lexer.src.toOpenArray(offset + 1, offset + 2)
-                                .parseHex(hex)
-        inc offset, 2
-        hex.char.some
-      else: char.none
-    else: char.none
-  inc offset
-  result[1] = offset
-
-proc chrExpr(parser: var Parser): ?char =
-  let
-    tk = !parser.lexer.next()
-    start = tk.span.s.offset + 1
-  if parser.at(start) == '\\':
-    if parser.at(start + 1) == '\'': some('\'')
-    else:
-      escSeq(parser, start + 1)[0]
-  else:
-    some(parser.at(start))
-
-proc strExpr(parser: var Parser): string =
-  let
-    tk = !parser.lexer.next()
-    start = tk.span.s.offset
-    len = tk.span.e.offset - start
-  result = newStringOfCap(len)
-  var
-    i = start + 1
-    item: char
-  while i < tk.span.e.offset - 1:
-    if parser.at(i) == '\\':
-      inc i
-      let cc = parser.at(i)
-      case cc
-      of '"': item = '"'
-      of 'r': item = '\r'
-      of 't': item = '\t'
-      of 'n': item = '\n'
-      of 'e': item = '\e'
-      of '\\': item = '\\'
-      of 'x', 'X':
-        inc i
-        if parser.lexer.src.len > i + 2:
-          if parser.at(i) notin HexDigits or
-          parser.at(i + 1) notin HexDigits:
-            # TODO !IMPORTANT: use the error throwing system
-            quit("Invalid hex escape character", QuitFailure)
-          else:
-            var hex: int
-            discard parser.lexer.src.toOpenArray(i, i + 1).parseHex(hex)
-            inc i
-            item = char(hex)
-        else:
-          quit("Invalid hex escape character", QuitFailure)
-      else:
-        quit("Invalid escape character", QuitFailure)
-    else:
-      item = parser.at(i)
-    inc i
-    result.add(item)
-
 type Precedence = range[-1..20]
+
+using
+  parser: var Parser
 
 let
   precInfix: array[OpKind, tuple[left, right: Precedence]] = static:
@@ -237,6 +34,7 @@ let
       opMinus:    (10, 11),
       opAsterisk: (12, 13),
       opSlash:    (12, 13),
+      # opArrow:    (15, 16),
       opDot:      (19, 20),
     }
     for (kind, prec) in mapping:
@@ -245,25 +43,31 @@ let
   precPrefix = Precedence(17)
   precPostfix = Precedence(18)
 
-proc parseExpr*(parser: var Parser,
+proc parseExpr*(parser;
                 minPrec = Precedence.low,
-                terminalTokens: set[TokenKind] = {}): Expr
-proc parseBlock*(parser: var Parser, termins: set[TokenKind] = {}): Block[Stmt]
+                stopTokens: set[TokenKind] = {}): Expr
+proc parseBlock*(parser; termins: set[TokenKind] = {}): Block[Stmt]
 
-proc parseField(parser: var Parser): Field =
+proc parseField(parser; typeRequired: static[bool] = true): Field =
   let tkName = parser.expect(tokIdent)
   discard parser.expect(tokColon)
   result.name = parser.lexer[tkName.span]
-  result.typ = parser.parseExpr(terminalTokens = { tokAssign })
-  if result.typ.kind == exprNone: parser.missingType()
+  result.typ =
+    when not typeRequired:
+      parser.parseExpr(stopTokens = { tokAssign, tokComma })
+    else:
+      parser.parseExpr(stopTokens = { tokAssign })
+  when typeRequired:
+    if result.typ.kind == exprNone: parser.missingType()
 
-proc parseFcBlock[TF: FcExpr or FcDecl](parser: var Parser): TF =
-  discard parser.lexer.next()
-  when TF is FcDecl: result.name = parser.lexer[parser.expect(tokIdent).span]
-  discard parser.expect(tokLParen)
+proc parseFcBlock[TF: FcExpr|FcDecl](parser): TF =
+  when TF is FcDecl:
+    result.name = parser.lexer[parser.expect(tokIdent).span]
+    discard parser.expect(tokLParen)
   if parser.lookahead.kind != tokRParen: result.params = @[]
   while not ?parser.eat({tokRParen, tokEof}):
-    let arg = parser.parseField()
+    let arg = parser.parseField(TF is FcDecl)
+    # stdout.print(arg.typ)
     result.params.add(arg)
     if not ?parser.eat(tokComma):
       discard parser.expect(tokRParen, consume = false)
@@ -272,7 +76,46 @@ proc parseFcBlock[TF: FcExpr or FcDecl](parser: var Parser): TF =
   result.body = parser.parseBlock()
   discard parser.expect(tokEnd)
 
-proc bracketExpr(parser: var Parser): seq[Expr] =
+proc parseFcType(parser): FcType =
+  ## Parses function types, continuing from the state where the opening
+  ## parenthesis that indicates the list of the argument (types) is the current
+  ## token and ':' is the lookahead
+  ##
+  ## EBNF specification:
+  ## .. code-block:: 
+  ##
+  ##    fctype := 'fc' '(' fctype_args ')'
+  ##    fctype_args := ':' {type {',' fctype}}
+  ##
+  ## Examples:
+  ## .. code-block::
+  ##
+  ##    fc(:) # no arguments, no returns
+  ##    fc(: int) # receives an int, no returns
+  ##    fc(:): string # no arguments, returns string
+  ##    fc(: int, int): int # receives 2 ints, returns int
+  discard parser.lexer.next() # tokColon
+  if ?parser.eat(tokRParen):
+    result.params = @[]
+  else: # we have argument types
+    while not ?parser.eat(tokRParen):
+      result.params.add(parser.parseExpr())
+      if result.params[^1].kind == exprNone: parser.missingType()
+      if ?parser.eat(tokComma):
+        # NOTE: Maybe remove the colons except the first one that comes
+        #       directly after the opening parenthesis, because is required
+        #       to make the distinction between between `FcExpr` and `FcType`.
+        #
+        # we are forced to check and skip the colons after we encounter and
+        # skip a comma, because we skip the first colon at the top, so we can't
+        # skip the colon first and then proceed to parse the type.
+        discard parser.expect(tokColon)
+      else:
+        discard parser.expect(tokRParen, consume = false)
+    if ?parser.eat(tokColon):
+      result.ret = box(parser.parseExpr())
+
+proc bracketExpr(parser): seq[Expr] =
   discard parser.lexer.next()
   if not ?parser.eat(tokRBracket):
     result = @[]
@@ -284,8 +127,37 @@ proc bracketExpr(parser: var Parser): seq[Expr] =
       if not ?parser.eat(tokComma):
         discard parser.expect(tokRBracket, consume = false)
 
-proc primaryExpr(parser: var Parser): Expr =
+proc boxValExpr(parser): seq[(?string, Expr)] =
+  discard parser.lexer.next()
+  if not ?parser.eat(tokRBrace):
+    result = @[]
+    while not ?parser.eat(tokRBrace):
+      let key =
+        if ?parser.eat(tokDot):
+          let keyName = parser.lexer[parser.expect(tokIdent).span]
+          discard parser.expect(tokAssign)
+          some(keyName)
+        else:
+          none(string)
+      let value = parser.parseExpr()
+      if value.kind == exprNone:
+        parser.error(peExpected, "valid expression")
+      result.add((key, value))
+      if not ?parser.eat(tokComma):
+        discard parser.expect(tokRBrace, consume = false)
+
+proc primaryExpr(parser; stopTokens: set[TokenKind] = {}): Expr =
+  let stopTokens = stopTokens + {
+    tokEof,
+    tokEnd,
+    tokSemicolon,
+    tokRParen,
+    tokRBracket,
+    tokRBrace
+  }
   let kind = parser.lookahead.kind
+  if kind in stopTokens:
+    return Expr(kind: exprNone)
   case kind
   of tokIntLit:
     result = Expr(kind: exprLit, lit: Lit(kind: litInt, i: parser.intExpr()))
@@ -309,8 +181,20 @@ proc primaryExpr(parser: var Parser): Expr =
     discard parser.expect(tokRParen)
   of tokLBracket:
     result = Expr(kind: exprBracket, bracket: parser.bracketExpr())
+  of tokLBrace:
+    result = Expr(kind: exprBoxVal, boxVal: parser.boxValExpr())
   of tokFc:
-    result = Expr(kind: exprFc, fc: parser.parseFcBlock[:FcExpr]())
+    # In the expression/statement main parsing function, skip `fc`. If there is
+    # an identifier, `parseFcBlock[FcDecl]`. The function that does that
+    # continues from that point. Otherwise, skip the open parenthesis. Then if
+    # there is a colon `parseFcType`, otherwise `parseFcBlock[FcDecl]`. Both
+    # these functions should be able to parse from that point on.
+    discard parser.lexer.next() # 'fc'
+    discard parser.expect(tokLParen)
+    if parser.lookahead.kind == tokColon:
+      result = Expr(kind: exprFcType, fcType: parser.parseFcType())
+    else:
+      result = Expr(kind: exprFc, fc: parser.parseFcBlock[:FcExpr]())
   of tokEof:
     result = Expr(kind: exprNone)
   of InfixOpTokens:
@@ -319,34 +203,22 @@ proc primaryExpr(parser: var Parser): Expr =
     echo parser.lookahead
     todo("Either invalid or not-yet-handled token")
 
-proc fcArgs(parser: var Parser): seq[Expr] =
+proc fcArgs(parser): seq[Expr] =
   while not ?parser.eat(tokRParen):
     result.add(parser.parseExpr(0))
     if not ?parser.eat(tokComma):
       discard parser.expect(tokRParen, consume = false)
 
-proc parseFcCall(parser: var Parser, callee: sink Expr): Expr =
+proc parseFcCall(parser; callee: sink Expr): Expr =
   discard parser.lexer.next() # the checking for the opening parenthesis was
                               # made at the level calling this
   result = Expr(kind: exprFcCall,
                 fcCall: FcCall(callee: box(callee), args: parser.fcArgs()))
 
-func toPrefOp(kind: TokenKind): OpKind {.inline.} =
-  case kind
-  of tokMinus: opMinus
-  of tokNot: opNot
-  else: opNone
-
-func toInOp(kind: TokenKind): OpKind {.inline.} =
-  if kind == tokLBracket: opIndex
-  else                  : OpKind(ord(kind) - ord(tokPlus) + 1)
-
-func toPostOp(kind: TokenKind): OpKind {.inline.} = opNone
-
-proc parseExpr(parser: var Parser,
+proc parseExpr(parser;
                minPrec = Precedence.low,
-               terminalTokens: set[TokenKind] = {}) : Expr =
-  let terminalTokens = terminalTokens + {
+               stopTokens: set[TokenKind] = {}) : Expr =
+  let stopTokens = stopTokens + {
     tokEof,
     tokEnd,
     tokSemicolon,
@@ -359,10 +231,10 @@ proc parseExpr(parser: var Parser,
       discard parser.lexer.next()
       Expr(kind: exprOp,
            op: Op(kind: pref.toPrefOp(),
-                  operands: @[parser.parseExpr(precPrefix, terminalTokens)]))
+                  operands: @[parser.parseExpr(precPrefix, stopTokens)]))
     else:
-      parser.primaryExpr()
-  while parser.lookahead.kind.withas(afterKind) notin terminalTokens:
+      parser.primaryExpr(stopTokens)
+  while parser.lookahead.kind.withas(afterKind) notin stopTokens:
     if afterKind == tokEOF: break
     elif afterKind == tokLBracket: # this is a special case
       if precPostfix < minPrec: break
@@ -400,7 +272,7 @@ proc parseExpr(parser: var Parser,
 #----------------------------- Statement parsing -----------------------------#
 ###############################################################################
 
-proc parseLoc(parser: var Parser): VarDecl =
+proc parseLoc(parser): VarDecl =
   discard parser.lexer.next()
   let field = parser.parseField()
   result.name = field.name
@@ -410,7 +282,7 @@ proc parseLoc(parser: var Parser): VarDecl =
     if result.value.kind == exprNone: parser.error(peExpected, "expression")
   discard parser.expect(tokSemicolon)
 
-proc parseIf(parser: var Parser): IfStmt =
+proc parseIf(parser): IfStmt =
   # The structure of the if statemet is as follows
   # if
   # ?(cond1)
@@ -434,15 +306,16 @@ proc parseIf(parser: var Parser): IfStmt =
     var clause: IfClause
     discard parser.expect(tokQuestion)
     discard parser.expect(tokLParen)
+    # TODO: Rethink this
     if parser.lookahead.kind == tokRParen: elseReached = true
     else: clause.cond = parser.parseExpr()
     discard parser.expect(tokRParen)
     clause.body = parser.parseBlock({tokQuestion})
     result.add(clause)
 
-proc parseStmt*(parser: var Parser): Stmt
+proc parseStmt*(parser): Stmt
 
-proc parseForLoop(parser: var Parser): ForLoop =
+proc parseForLoop(parser): ForLoop =
   if not ?parser.eat(tokSemicolon):
     result.init = box(parser.parseStmt())
     if result.init.kind notin {stmtVarDecl, stmtExpr, stmtRet, stmtNone}:
@@ -454,7 +327,7 @@ proc parseForLoop(parser: var Parser): ForLoop =
   result.body = parser.parseBlock()
   discard parser.expect(tokEnd)
 
-proc parseFor(parser: var Parser): Stmt =
+proc parseFor(parser): Stmt =
   # for loops:
   # either
   # for (a in b) # no loc
@@ -485,7 +358,16 @@ proc parseFor(parser: var Parser): Stmt =
   else:
     result = Stmt(kind: stmtForLoop, forl: parser.parseForLoop())
 
-proc parseStmt*(parser: var Parser): Stmt =
+proc parseFcExpr(parser): Expr {.inline.} =
+  # 'fc' has been skiped by a previous function higher up the call stack
+  discard parser.expect(tokLParen)
+  if parser.lookahead.kind == tokColon:
+    result = Expr(kind: exprFcType, fcType: parser.parseFcType())
+  else:
+    result = Expr(kind: exprFc, fc: parser.parseFcBlock[:FcExpr]())
+
+proc parseStmt*(parser): Stmt =
+  let start = parser.lookahead.span.s
   case parser.lookahead.kind
   of tokIf:
     result = Stmt(kind: stmtIf, ifs: parser.parseIf())
@@ -514,18 +396,44 @@ proc parseStmt*(parser: var Parser): Stmt =
       result.ret = Expr(kind: exprNone)
       discard parser.lexer.next()
   of tokFc:
-    result = Stmt(kind: stmtFcDecl, fcDecl: parser.parseFcBlock[:FcDecl]())
+    discard parser.lexer.next() # 'fc'
+    if parser.lookahead.kind == tokIdent:
+      result = Stmt(kind: stmtFcDecl, fcDecl: parser.parseFcBlock[:FcDecl]())
+    else:
+      result = Stmt(kind: stmtExpr, expr: parser.parseFcExpr())
+      discard parser.expect(tokSemicolon)
   of tokSemicolon:
     discard parser.lexer.next()
     result = Stmt(kind: stmtNone)
   else:
     result = Stmt(kind: stmtExpr, expr: parser.parseExpr())
     discard parser.expect(tokSemicolon)
+  let `end` = parser.lexer.pos
+  result.span = (start, `end`)
 
-proc parseBlock*(parser: var Parser,
-                 termins: set[TokenKind] = {}): Block[Stmt] =
-  let terminalTokens = termins + {tokEnd, tokEof}
+proc parseBlock*(parser; termins: set[TokenKind] = {}): Block[Stmt] =
+  let stopTokens = termins + {tokEnd, tokEof}
   result = initBlock[Stmt]()
-  while parser.lookahead.kind notin terminalTokens:
+  while parser.lookahead.kind notin stopTokens:
     let stmt = parser.parseStmt()
     if stmt.kind != stmtNone: result.code.add(stmt)
+
+###############################################################################
+#----------------------------- Top level parsing -----------------------------#
+###############################################################################
+
+proc parseBoxDecl(parser): BoxDecl = todo("Box declaration")
+
+proc parseTopLevel(parser): TopLevel =
+  let start = parser.lookahead.span.s
+  case parser.lookahead.kind
+  of tokFc:
+    todo("Top level function declaration")
+  of tokBox:
+    todo("Top level box declaration")
+  of tokLoc:
+    todo("Top level module variable")
+  else:
+    todo("Other top level construct or semantic(?) error")
+  let `end` = parser.lexer.pos
+  result.span = (start, `end`)

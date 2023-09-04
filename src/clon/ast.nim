@@ -49,6 +49,9 @@ type
     body*: Block[Stmt]
   FcDecl* = object of FcExpr
     name*: string
+  FcType* {.pure.} = object
+    params*: seq[Expr]
+    ret*: Box[Expr]
   ExprKind* = enum
     exprNone
     exprLit
@@ -56,7 +59,9 @@ type
     exprOp
     exprFc
     exprFcCall
+    exprFcType
     exprBracket
+    exprBoxVal
   FcCall* = object
     callee*:Box[Expr]
     args*: seq[Expr]
@@ -72,8 +77,12 @@ type
       fc*: FcExpr
     of exprFcCall:
       fcCall*: FcCall
+    of exprFcType:
+      fcType*: FcType
     of exprBracket:
       bracket*: seq[Expr]
+    of exprBoxVal:
+      boxVal*: seq[(?string, Expr)]
     else: discard
   Field* {.pure, inheritable.} = object
     name*: string
@@ -125,7 +134,7 @@ type
       fcDecl*: FcDecl
     of stmtRet:
       ret*: Expr
-  TopLevelKind* = enum tlNone, tlFcDecl, tlBoxDecl, tlGlobVar
+  TopLevelKind* = enum tlNone, tlFcDecl, tlBoxDecl, tlModVar
   TopLevel* = object
     span*: Span
     case kind: TopLevelKind
@@ -134,11 +143,11 @@ type
       fcDecl*: FcDecl
     of tlBoxDecl:
       boxDecl*: BoxDecl
-    of tlGlobVar:
+    of tlModVar:
       globVar*: VarDecl
   Module* = object
     name*: string
-    # globs*: seq[tuple[name: string, typ: TypeID]]
+    # vars*: seq[tuple[name: string, typ: TypeID]]
     code*: Block[TopLevel]
     env*: Env
   Ast* = ref object
